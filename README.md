@@ -2,6 +2,8 @@
 
 > *"Baha ba?"* — Tagalog for **"Is It Flooded?"**
 
+![Bahaba Interface Screenshot](screenshot.png)
+
 Bahaba is an open-source, hyper-local flood monitoring and driving route navigation platform for Metro Manila, Philippines (specifically covering the Pasig-Marikina-Tullahan River Basin). It ingests live hydrological and rainfall telemetry from PAGASA (Philippine Atmospheric, Geophysical and Astronomical Services Administration), calculates real-time road surface flood depths using hydro-predictive heuristics and machine learning models, and evaluates flood risk along turn-by-turn driving routes.
 
 ---
