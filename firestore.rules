@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Active station snapshots (read public, write admin/service account only)
+    match /stations/{stationId} {
+      allow read: if true;
+      allow write: if false; // Server Admin SDK bypasses rules
+    }
+
+    // Historical telemetry records (read public, write admin/service account only)
+    match /telemetry_history/{documentId} {
+      allow read: if true;
+      allow write: if false; // Server Admin SDK bypasses rules
+    }
+
+    // Default deny for all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
