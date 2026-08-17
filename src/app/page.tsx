@@ -20,6 +20,12 @@ import { type RoadRiskResult, type RoadSeverity, calculateHaversineDistance } fr
 import { calculateWaterDepth, classifyFloodRisk } from "@/lib/engine/floodPredictor";
 import noahRoadsDataset from "@/lib/data/noah-roads.json";
 import { getStationCoords, slugifyStationId } from "@/lib/firebase/station-coords";
+import {
+  trackRouteCalculation,
+  trackStationSelected,
+  trackRoadSelected,
+  trackTableTabSwitch,
+} from "@/lib/firebase/analytics";
 import type { LiveStation, ScrapeResult } from "@/types";
 import type { NoahRoadSegment } from "@/types/flood-engine";
 
@@ -27,7 +33,6 @@ import type { NoahRoadSegment } from "@/types/flood-engine";
 export default function HomePage() {
   const { stations: firestoreStations, loading: firestoreLoading } = useLiveFloodStatus();
   const [fallbackStations, setFallbackStations] = useState<LiveStation[]>([]);
-  const [syncing, setSyncing] = useState(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
@@ -70,46 +75,50 @@ export default function HomePage() {
   const [tableSearchQuery, setTableSearchQuery] = useState<string>("");
   const [selectedRoadRisk, setSelectedRoadRisk] = useState<RoadRiskResult | null>(null);
 
-  // Telemetry Sync Trigger
-  const triggerTelemetrySync = async () => {
-    setSyncing(true);
-    try {
-      const res = await fetch("/api/cron/ingest");
-      if (res.ok) {
-        const data: ScrapeResult = await res.json();
-        if (data.stations && data.stations.length > 0) {
-          const mapped: LiveStation[] = data.stations.map((st) => {
-            const fallbackCoords = getStationCoords(st.stationName);
-            return {
-              stationId: slugifyStationId(st.stationName),
-              stationName: st.stationName,
-              latitude: st.latitude ?? fallbackCoords.lat,
-              longitude: st.longitude ?? fallbackCoords.lng,
-              geohash: "",
-              rain10m: st.rainfall?.rain10min ?? 0,
-              rain1h: st.rainfall?.rain1hr ?? 0,
-              rain24h: st.rainfall?.rain24hr ?? 0,
-              waterLevel: st.waterLevel?.currentLevel ?? 0,
-              waterLevelDelta1h: st.waterLevel?.change1hr ?? 0,
-              waterRiskLevel: st.waterRiskLevel,
-              rainRiskLevel: st.rainRiskLevel,
-              riskLevel: st.riskLevel,
-              lastUpdated: new Date(),
-            };
-          });
-          setFallbackStations(mapped);
-        }
-      }
-    } catch (err) {
-      console.error("[Telemetry Sync Error]", err);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
+  // Initial Telemetry Fetch Fallback (if Firestore is empty/connecting)
   useEffect(() => {
-    triggerTelemetrySync();
-  }, []);
+    let isMounted = true;
+    async function loadFallbackTelemetry() {
+      try {
+        const res = await fetch("/api/cron/ingest");
+        if (res.ok) {
+          const data: ScrapeResult = await res.json();
+          if (isMounted && data.stations && data.stations.length > 0) {
+            const mapped: LiveStation[] = data.stations.map((st) => {
+              const fallbackCoords = getStationCoords(st.stationName);
+              return {
+                stationId: slugifyStationId(st.stationName),
+                stationName: st.stationName,
+                latitude: st.latitude ?? fallbackCoords.lat,
+                longitude: st.longitude ?? fallbackCoords.lng,
+                geohash: "",
+                rain10m: st.rainfall?.rain10min ?? 0,
+                rain1h: st.rainfall?.rain1hr ?? 0,
+                rain24h: st.rainfall?.rain24hr ?? 0,
+                waterLevel: st.waterLevel?.currentLevel ?? 0,
+                waterLevelDelta1h: st.waterLevel?.change1hr ?? 0,
+                waterRiskLevel: st.waterRiskLevel,
+                rainRiskLevel: st.rainRiskLevel,
+                riskLevel: st.riskLevel,
+                lastUpdated: new Date(),
+              };
+            });
+            setFallbackStations(mapped);
+          }
+        }
+      } catch (err) {
+        console.warn("[Telemetry Initial Load Warn]", err);
+      }
+    }
+
+    if (firestoreStations.length === 0) {
+      loadFallbackTelemetry();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [firestoreStations.length]);
 
   // Use Firestore telemetry stations when available; fall back to scraped data
   const activeStations = useMemo(() => {
@@ -224,10 +233,10 @@ export default function HomePage() {
         classification.category === "NORMAL"
           ? "NORMAL"
           : classification.category === "LOW"
-          ? "ALERT"
-          : classification.category === "HIGH"
-          ? "ALARM"
-          : "CRITICAL";
+            ? "ALERT"
+            : classification.category === "HIGH"
+              ? "ALARM"
+              : "CRITICAL";
 
       const rainFactor = Math.min(1.0, effectiveRain1h / 30.0);
       const depthFactor = Math.min(1.0, depthCm / 50.0);
@@ -294,6 +303,18 @@ export default function HomePage() {
           setRouteOptions(routes);
           setSelectedRouteIdx(0);
           setLoadingRoute(false);
+
+          if (routes.length > 0) {
+            const fastest = routes[0];
+            trackRouteCalculation({
+              origin: originLoc.name,
+              destination: destLoc.name,
+              distanceKm: fastest.distanceKm,
+              durationMin: fastest.durationMin,
+              maxFloodDepthCm: fastest.maxFloodDepthCm,
+              overallStatus: fastest.overallStatus,
+            });
+          }
         }
       })
       .catch((err) => {
@@ -316,6 +337,12 @@ export default function HomePage() {
   // Focus Map on Selected Monitored Road Corridor
   const handleSelectRoad = (road: RoadRiskResult) => {
     setSelectedRoadRisk(road);
+    trackRoadSelected({
+      roadName: road.roadName,
+      severity: road.severity,
+      estimatedDepthCm: road.estimatedDepthCm,
+      hazardScore: road.hazardScore,
+    });
     const mapElement = document.getElementById("bahaba-interactive-map");
     if (mapElement) {
       mapElement.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -325,6 +352,12 @@ export default function HomePage() {
   // Focus Map First, let camera fly to the road, then Open Share Modal
   const handleFocusAndShareRoad = (road: RoadRiskResult) => {
     setSelectedRoadRisk(road);
+    trackRoadSelected({
+      roadName: road.roadName,
+      severity: road.severity,
+      estimatedDepthCm: road.estimatedDepthCm,
+      hazardScore: road.hazardScore,
+    });
     const mapElement = document.getElementById("bahaba-interactive-map");
     if (mapElement) {
       mapElement.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -358,46 +391,24 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Live Indicator (desktop only) */}
-            <div className="hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+            {/* Real-time Telemetry Live Indicator */}
+            <div className="flex items-center gap-2 text-xs text-slate-300 bg-slate-950/80 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-800 backdrop-blur shadow-sm">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span>PAGASA + Panahon AWS</span>
+              <span className="hidden sm:inline font-medium text-slate-200">PAGASA Telemetry</span>
             </div>
 
             {/* Share Report Button */}
             <button
               onClick={() => setIsShareModalOpen(true)}
-              className="flex items-center gap-1.5 sm:gap-2 text-xs font-semibold px-2.5 sm:px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 hover:border-cyan-500/60 shadow-md transition-all active:scale-95 flex-shrink-0"
+              className="flex items-center gap-1.5 sm:gap-2 text-xs font-semibold px-2.5 sm:px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-950/40 transition-all active:scale-95 flex-shrink-0"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
               </svg>
               <span>Share<span className="hidden sm:inline"> Report</span></span>
-            </button>
-
-            {/* Sync Button */}
-            <button
-              onClick={triggerTelemetrySync}
-              disabled={syncing}
-              className="flex items-center gap-1.5 sm:gap-2 text-xs font-semibold px-2.5 sm:px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white shadow-md transition-all disabled:opacity-50 flex-shrink-0"
-            >
-              <svg
-                className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              <span>{syncing ? "Syncing..." : <><span>Sync</span><span className="hidden sm:inline"> Telemetry</span></>}</span>
             </button>
           </div>
         </div>
@@ -671,7 +682,10 @@ export default function HomePage() {
             {/* Table Selector Tabs */}
             <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs w-full sm:w-auto">
               <button
-                onClick={() => setActiveTableTab("station-telemetry")}
+                onClick={() => {
+                  setActiveTableTab("station-telemetry");
+                  trackTableTabSwitch("station-telemetry");
+                }}
                 className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg font-bold transition-all text-center ${activeTableTab === "station-telemetry"
                   ? "bg-cyan-600 text-white shadow-md"
                   : "text-slate-400 hover:text-slate-200"
@@ -680,7 +694,10 @@ export default function HomePage() {
                 💧 Stations Telemetry
               </button>
               <button
-                onClick={() => setActiveTableTab("road-predictions")}
+                onClick={() => {
+                  setActiveTableTab("road-predictions");
+                  trackTableTabSwitch("road-predictions");
+                }}
                 className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg font-bold transition-all text-center ${activeTableTab === "road-predictions"
                   ? "bg-cyan-600 text-white shadow-md"
                   : "text-slate-400 hover:text-slate-200"
@@ -697,7 +714,19 @@ export default function HomePage() {
               <StationTable
                 stations={activeStations}
                 selectedStationId={selectedStationId}
-                onSelectStation={(id) => setSelectedStationId(id)}
+                onSelectStation={(id) => {
+                  setSelectedStationId(id);
+                  const st = activeStations.find((s) => s.stationId === id);
+                  if (st) {
+                    trackStationSelected({
+                      stationId: st.stationId,
+                      stationName: st.stationName,
+                      waterLevel: st.waterLevel,
+                      riskLevel: st.riskLevel,
+                      source: "table",
+                    });
+                  }
+                }}
               />
             </div>
           )}

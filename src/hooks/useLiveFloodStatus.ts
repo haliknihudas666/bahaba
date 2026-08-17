@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useEffect } from "react";
+import { collection, onSnapshot, query, orderBy, Timestamp } from "firebase/firestore";
 import { clientDb } from "@/lib/firebase/client";
 import type { LiveStation } from "@/types";
 
@@ -37,9 +38,6 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
     }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { collection, onSnapshot, query, orderBy, Timestamp } = require("firebase/firestore");
-
       setLoading(true);
       setError(null);
 

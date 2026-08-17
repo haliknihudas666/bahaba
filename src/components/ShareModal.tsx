@@ -9,6 +9,7 @@ import { toPng, toBlob } from "html-to-image";
 import type { RouteOption } from "@/lib/engine/routeSolver";
 import type { RoadRiskResult } from "@/lib/engine/roadRisk";
 import { classifyFloodRisk } from "@/lib/engine/floodPredictor";
+import { trackShareAction } from "@/lib/firebase/analytics";
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -68,12 +69,18 @@ export default function ShareModal({
     }, 4000);
   }, []);
 
-  // Capture Map Snapshot whenever Modal opens
+  // Capture Map Snapshot and track open whenever Modal opens
   useEffect(() => {
     if (!isOpen) {
       setMapSnapshotUrl(null);
       return;
     }
+
+    trackShareAction({
+      action: "open_modal",
+      format: shareFormat,
+      targetType: isRouteActive ? "route" : selectedRoad ? "road" : "general",
+    });
 
     setCapturingMap(true);
 
@@ -212,6 +219,11 @@ export default function ShareModal({
   const handleCopyImage = async () => {
     if (!cardRef.current) return;
     setActionLoading("copy-img");
+    trackShareAction({
+      action: "copy_image",
+      format: shareFormat,
+      targetType: isRouteActive ? "route" : selectedRoad ? "road" : "general",
+    });
     try {
       const blob = await toBlob(cardRef.current, {
         pixelRatio: 2,
@@ -244,6 +256,11 @@ export default function ShareModal({
   const handleDownloadImage = async () => {
     if (!cardRef.current) return;
     setActionLoading("download");
+    trackShareAction({
+      action: "download_png",
+      format: shareFormat,
+      targetType: isRouteActive ? "route" : selectedRoad ? "road" : "general",
+    });
     try {
       const dataUrl = await toPng(cardRef.current, {
         pixelRatio: 2,
@@ -271,6 +288,11 @@ export default function ShareModal({
   const handleNativeShare = async () => {
     if (!cardRef.current) return;
     setActionLoading("share");
+    trackShareAction({
+      action: "native_share",
+      format: shareFormat,
+      targetType: isRouteActive ? "route" : selectedRoad ? "road" : "general",
+    });
     try {
       const blob = await toBlob(cardRef.current, {
         pixelRatio: 2,
@@ -315,6 +337,11 @@ export default function ShareModal({
   // 4. Action: Copy Plain Text Alert
   const handleCopyText = async () => {
     setActionLoading("copy-text");
+    trackShareAction({
+      action: "copy_text",
+      format: shareFormat,
+      targetType: isRouteActive ? "route" : selectedRoad ? "road" : "general",
+    });
     try {
       const summary = buildTextSummary();
       await navigator.clipboard.writeText(summary);

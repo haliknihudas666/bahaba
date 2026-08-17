@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+import FirebaseAnalytics from "@/components/FirebaseAnalytics";
+
 export const metadata: Metadata = {
   title: "Bahaba – Metro Manila Flood Prediction & Telemetry",
   description:
@@ -23,6 +25,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased bg-slate-950 text-slate-100 min-h-screen">
+        <FirebaseAnalytics />
         {children}
       </body>
     </html>

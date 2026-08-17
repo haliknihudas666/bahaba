@@ -133,10 +133,19 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser to view the active flood monitoring dashboard.
 
-### 4. Trigger Telemetry Ingestion Cron (Manual / Local Test)
+### 4. Telemetry Ingestion (Automated Vercel Cron / Local Test)
+
+Bahaba uses **Vercel Cron Jobs** configured in `vercel.json` to automatically trigger `/api/cron/ingest` every 5 minutes (`*/5 * * * *`).
+
+To trigger the telemetry scraper manually for local testing:
 
 ```bash
 curl http://localhost:3000/api/cron/ingest
+```
+
+If `CRON_SECRET` is configured in your `.env.local`:
+```bash
+curl -H "Authorization: Bearer your_cron_secret" http://localhost:3000/api/cron/ingest
 ```
 
 ---

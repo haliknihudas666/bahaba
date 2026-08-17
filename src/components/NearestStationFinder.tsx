@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { calculateHaversineDistance } from "@/lib/firebase/geo-utils";
+import { trackNearestStationSearch } from "@/lib/firebase/analytics";
 import type { LiveStation, NearestStationResult } from "@/types";
 import LocationAutocomplete from "./LocationAutocomplete";
 
@@ -58,13 +59,27 @@ export default function NearestStationFinder({
     }
 
     if (closestStation) {
+      const dist = Math.round(minDistanceKm * 100) / 100;
       setResult({
         station: closestStation,
-        distanceKm: Math.round(minDistanceKm * 100) / 100,
+        distanceKm: dist,
       });
       onSelectStation(closestStation.stationId);
+      trackNearestStationSearch({
+        locationName: selectedLocationName,
+        latitude: latNum,
+        longitude: lngNum,
+        nearestStationName: closestStation.stationName,
+        distanceKm: dist,
+        riskLevel: closestStation.riskLevel,
+      });
     } else {
       setErrorMsg("No station found in proximity.");
+      trackNearestStationSearch({
+        locationName: selectedLocationName,
+        latitude: latNum,
+        longitude: lngNum,
+      });
     }
 
     setLoading(false);
