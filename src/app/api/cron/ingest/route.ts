@@ -92,27 +92,7 @@ async function persistTelemetryToFirestore(stations: StationTelemetry[]): Promis
 // GET /api/cron/ingest
 // ---------------------------------------------------------------------------
 
-export async function GET(request: NextRequest): Promise<NextResponse<ScrapeResult>> {
-  // ── Verify Vercel Cron Secret (if CRON_SECRET is configured) ─────────────
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json(
-        {
-          success: false,
-          scrapedAt: new Date().toISOString(),
-          stations: [],
-          rainfall: [],
-          waterLevels: [],
-          error: "Unauthorized: Invalid or missing Cron Bearer token.",
-          meta: { durationMs: 0, rainfallRowCount: 0, waterLevelRowCount: 0 },
-        },
-        { status: 401 }
-      );
-    }
-  }
-
+export async function GET(): Promise<NextResponse<ScrapeResult>> {
   // ── Run telemetry scraping ──────────────────────────────────────────────
   const result = await ingestTelemetry();
 
