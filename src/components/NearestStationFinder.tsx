@@ -71,13 +71,13 @@ export default function NearestStationFinder({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+          <h3 className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
             <span>📍 Location Search</span>
           </h3>
-          <p className="text-xs text-slate-400">
+          <p className="text-[11px] sm:text-xs text-slate-400">
             Type any place or landmark in Metro Manila to identify the nearest PAGASA telemetry station
           </p>
         </div>

@@ -125,12 +125,12 @@ export default function StationTable({
   return (
     <div className="flex flex-col h-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
       {/* Controls Bar */}
-      <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900/80 backdrop-blur">
+      <div className="p-3.5 sm:p-4 border-b border-slate-800 space-y-3 bg-slate-900/80 backdrop-blur">
         {/* Tab Switcher */}
-        <div className="flex items-center gap-0 bg-slate-950 p-1 rounded-xl border border-slate-800 w-fit">
+        <div className="flex items-center gap-0 bg-slate-950 p-1 rounded-xl border border-slate-800 w-full sm:w-fit">
           <button
             onClick={() => handleTabSwitch("waterLevel")}
-            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 sm:py-2 text-xs font-bold rounded-lg transition-all ${
               activeTab === "waterLevel"
                 ? "bg-cyan-600 text-white shadow-md shadow-cyan-600/30"
                 : "text-slate-400 hover:text-slate-200"
@@ -143,7 +143,7 @@ export default function StationTable({
           </button>
           <button
             onClick={() => handleTabSwitch("rainfall")}
-            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 sm:py-2 text-xs font-bold rounded-lg transition-all ${
               activeTab === "rainfall"
                 ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
                 : "text-slate-400 hover:text-slate-200"
@@ -177,17 +177,17 @@ export default function StationTable({
               placeholder="Filter by station name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+              className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
             />
           </div>
 
           {/* Risk Level Filter Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 custom-scrollbar">
             {["ALL", "CRITICAL", "ALARM", "ALERT", "NORMAL"].map((risk) => (
               <button
                 key={risk}
                 onClick={() => setRiskFilter(risk)}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all ${
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all whitespace-nowrap ${
                   riskFilter === risk
                     ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm"
                     : "bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200"
@@ -200,8 +200,100 @@ export default function StationTable({
         </div>
       </div>
 
-      {/* Table Container */}
-      <div className="flex-1 overflow-auto max-h-[520px] scrollbar-thin scrollbar-thumb-slate-800">
+      {/* ── MOBILE CARDS VIEW (<md screens) ────────────────────────── */}
+      <div className="p-3 grid grid-cols-1 gap-2.5 md:hidden overflow-y-auto max-h-[500px] custom-scrollbar">
+        {filteredAndSortedStations.length === 0 ? (
+          <div className="py-8 text-center text-slate-500 text-xs">
+            No telemetry stations matching search criteria.
+          </div>
+        ) : (
+          filteredAndSortedStations.map((st) => {
+            const isSelected = st.stationId === selectedStationId;
+            const tabRisk = activeTab === "waterLevel" ? (st.waterRiskLevel || st.riskLevel) : (st.rainRiskLevel || st.riskLevel);
+            const badge = RISK_BADGES[tabRisk] || RISK_BADGES.UNKNOWN;
+
+            return (
+              <div
+                key={st.stationId}
+                onClick={() => onSelectStation(st.stationId)}
+                className={`p-3 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                  isSelected
+                    ? "bg-cyan-950/40 border-cyan-500/60 ring-1 ring-cyan-500/30 shadow-md"
+                    : "bg-slate-950/70 border-slate-800 hover:border-slate-700"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-bold text-xs text-white">{st.stationName}</div>
+                    <div className="text-[10px] text-slate-500 font-mono">
+                      {st.latitude.toFixed(4)}, {st.longitude.toFixed(4)}
+                    </div>
+                  </div>
+                  <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-full border flex-shrink-0 ${badge.class}`}>
+                    {badge.label}
+                  </span>
+                </div>
+
+                {activeTab === "waterLevel" ? (
+                  <div className="flex items-center justify-between text-xs font-mono p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Water Level</span>
+                      <strong className="text-sm font-bold text-slate-100">
+                        {st.waterLevel.toFixed(2)} <span className="text-[10px] text-slate-400 font-sans">m</span>
+                      </strong>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block">1h Delta</span>
+                      <span
+                        className={`text-xs font-semibold ${
+                          st.waterLevelDelta1h > 0
+                            ? "text-red-400"
+                            : st.waterLevelDelta1h < 0
+                            ? "text-emerald-400"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        {st.waterLevelDelta1h > 0 ? "▲ +" : st.waterLevelDelta1h < 0 ? "▼ " : ""}
+                        {st.waterLevelDelta1h.toFixed(2)} m
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1.5 text-center text-xs font-mono p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">10 min</span>
+                      <RainfallCell value={st.rain10m} />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">1 hr</span>
+                      <RainfallCell value={st.rain1h} />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">24 hr</span>
+                      <RainfallCell value={st.rain24h} highlight />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectStation(st.stationId);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-cyan-600 text-[10px] font-bold text-cyan-300 hover:text-white border border-slate-700 transition-colors flex items-center gap-1"
+                  >
+                    <span>📍 Locate on Map</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* ── DESKTOP TABLE VIEW (md+ screens) ─────────────────────────── */}
+      <div className="hidden md:block flex-1 overflow-auto max-h-[520px] scrollbar-thin scrollbar-thumb-slate-800">
         <table className="w-full text-left text-sm text-slate-300">
           <thead className="bg-slate-950/80 text-xs font-semibold uppercase tracking-wider text-slate-400 sticky top-0 backdrop-blur z-10 border-b border-slate-800">
             <tr>

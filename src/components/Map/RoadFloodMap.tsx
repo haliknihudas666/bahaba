@@ -475,10 +475,12 @@ export default function RoadFloodMap({
     map.whenReady(renderRoute);
   }, [fullRoutePolyline, routeSegments, originCoords, destinationCoords, mapLoaded]);
 
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
+
   return (
-    <div id="bahaba-interactive-map" className="relative w-full h-full min-h-[460px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
+    <div id="bahaba-interactive-map" className="relative w-full h-full min-h-[380px] sm:min-h-[460px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
       {/* Map Container */}
-      <div ref={mapContainerRef} className="w-full h-full min-h-[460px] z-0" />
+      <div ref={mapContainerRef} className="w-full h-full min-h-[380px] sm:min-h-[460px] z-0" />
 
       {/* Embedded Road Flood Overlay & NOAH BBox Vector Layer */}
       {mapLoaded && leafletMapRef.current && (
@@ -493,26 +495,48 @@ export default function RoadFloodMap({
         </>
       )}
 
-      {/* Dynamic Map Legend Overlay */}
-      <div className="absolute bottom-4 left-4 z-[400] bg-slate-900/90 backdrop-blur-md border border-slate-800 p-3 rounded-xl shadow-xl text-xs space-y-1.5 min-w-[210px]">
-        <div className="font-semibold text-slate-300 uppercase tracking-wider text-[10px] mb-1">
-          Route Flood Highlight Legend
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-1.5 rounded-full bg-[#2563eb] shadow-sm"></span>
-          <span className="text-slate-300">Clear Route (0–5 cm)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-1.5 rounded-full bg-[#f97316] shadow-sm"></span>
-          <span className="text-slate-300">Gutter Deep (6–15 cm)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-1.5 rounded-full bg-[#ef4444] shadow-sm"></span>
-          <span className="text-slate-300">Half-Tire Deep (16–30 cm)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-1.5 rounded-full bg-[#7f1d1d] shadow-sm"></span>
-          <span className="text-slate-300">Waist Deep+ (&gt;30 cm)</span>
+      {/* Dynamic Map Legend Overlay - Responsive & Collapsible on Mobile */}
+      <div className="absolute bottom-3 left-3 z-[400] max-w-[calc(100%-24px)]">
+        {/* Toggle Button for Mobile / Small Screens */}
+        <button
+          onClick={() => setIsLegendOpen(!isLegendOpen)}
+          className="sm:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-[11px] font-bold text-slate-200 shadow-xl active:scale-95 transition-all"
+        >
+          <span>🎨 Flood Legend</span>
+          <span className="text-[10px] text-cyan-400">{isLegendOpen ? "▲ Hide" : "▼ Show"}</span>
+        </button>
+
+        {/* Legend Content (Always visible on sm+, expandable on mobile) */}
+        <div
+          className={`${
+            isLegendOpen ? "flex" : "hidden sm:flex"
+          } flex-col mt-2 sm:mt-0 bg-slate-900/95 backdrop-blur-md border border-slate-800 p-2.5 sm:p-3 rounded-xl shadow-xl text-xs space-y-1.5 min-w-[200px] sm:min-w-[210px]`}
+        >
+          <div className="flex items-center justify-between font-semibold text-slate-300 uppercase tracking-wider text-[10px] mb-0.5">
+            <span>Route Flood Legend</span>
+            <button
+              onClick={() => setIsLegendOpen(false)}
+              className="sm:hidden text-slate-400 hover:text-white p-0.5"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+            <span className="w-3.5 h-1.5 rounded-full bg-[#2563eb] shadow-sm flex-shrink-0"></span>
+            <span className="text-slate-300">Clear Route (0–5 cm)</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+            <span className="w-3.5 h-1.5 rounded-full bg-[#f97316] shadow-sm flex-shrink-0"></span>
+            <span className="text-slate-300">Gutter Deep (6–15 cm)</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+            <span className="w-3.5 h-1.5 rounded-full bg-[#ef4444] shadow-sm flex-shrink-0"></span>
+            <span className="text-slate-300">Half-Tire Deep (16–30 cm)</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+            <span className="w-3.5 h-1.5 rounded-full bg-[#7f1d1d] shadow-sm flex-shrink-0"></span>
+            <span className="text-slate-300">Waist Deep+ (&gt;30 cm)</span>
+          </div>
         </div>
       </div>
 
