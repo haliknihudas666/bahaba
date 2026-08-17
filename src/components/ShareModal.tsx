@@ -408,162 +408,170 @@ export default function ShareModal({
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════ */}
-          {/* ── FORMAT 1: INSTAGRAM STORY (9:16 PORTRAIT) ───────────────────── */}
+          {/* ── FORMAT 1: INSTAGRAM STORY (9:16 PORTRAIT WITH CENTERED CARD) ── */}
           {/* ══════════════════════════════════════════════════════════════════ */}
           {shareFormat === "story" ? (
             <div
               ref={cardRef}
               id="bahaba-share-card"
-              className="w-full max-w-[320px] sm:max-w-[350px] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border-2 border-slate-700/90 rounded-[28px] p-4 sm:p-5 shadow-2xl space-y-3 text-white font-sans relative overflow-hidden"
-              style={{ minHeight: "580px" }}
+              className="w-full max-w-[340px] sm:max-w-[370px] aspect-[9/16] bg-[#060a14] shadow-2xl p-3.5 sm:p-4 text-white font-sans relative overflow-hidden flex flex-col justify-center items-center rounded-none"
             >
-              {/* Instagram Story Top Header */}
-              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-base shadow-md shadow-cyan-500/30 flex-shrink-0">
-                    🌊
+              {/* Atmospheric Background Lighting */}
+              <div className="absolute top-10 left-1/2 -translate-x-1/2 w-64 h-32 bg-cyan-600/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-12 left-1/2 -translate-x-1/2 w-64 h-32 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* ── Inner Floating Card (Centered in Safe Zone) ──────────────── */}
+              <div className="w-full bg-[#0b1222]/95 border border-slate-800/90 rounded-[28px] p-3.5 sm:p-4 shadow-2xl space-y-2.5 relative z-10">
+                {/* Header Row */}
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-base shadow-md shadow-cyan-500/30 flex-shrink-0">
+                      🌊
+                    </div>
+                    <div>
+                      <div className="text-xs sm:text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+                        Baha Ba?
+                        <span className="text-[8px] font-extrabold px-1.5 py-0.2 rounded bg-gradient-to-r from-pink-500/30 to-amber-500/30 text-pink-300 border border-pink-500/40">
+                          LIVE ALERT
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-slate-400">Metro Manila Flood Telemetry</div>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div className="inline-flex items-center gap-1 text-[8px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      PAGASA + Panahon
+                    </div>
+                    <div className="text-[8px] text-slate-400 font-mono mt-0.5">{timestampStr}</div>
+                  </div>
+                </div>
+
+                {/* Section 1: Monitored Road Segment / Driving Route */}
+                {isRouteActive && origin && destination && activeRoute ? (
+                  <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2.5 space-y-1 shadow-sm">
+                    <div className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Driving Route</span>
+                      <span className="text-blue-400 font-mono text-[10px]">{activeRoute.distanceKm} km • {activeRoute.durationMin} mins</span>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white font-black text-[9px] flex items-center justify-center flex-shrink-0">
+                          A
+                        </span>
+                        <strong className="text-slate-100 text-xs truncate">
+                          {origin.name}
+                        </strong>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="w-4 h-4 rounded-full bg-rose-600 text-white font-black text-[9px] flex items-center justify-center flex-shrink-0">
+                          B
+                        </span>
+                        <strong className="text-slate-100 text-xs truncate">
+                          {destination.name}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                ) : selectedRoad ? (
+                  <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2.5 space-y-0.5 shadow-sm">
+                    <div className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider">
+                      Monitored Road Segment
+                    </div>
+                    <strong className="text-xs sm:text-sm font-bold text-white block truncate">
+                      {selectedRoad.roadName}
+                    </strong>
+                    <div className="text-[9px] text-slate-400 flex items-center gap-2 font-mono">
+                      <span>Elev: {selectedRoad.elevationMeters.toFixed(1)}m</span>
+                      <span>•</span>
+                      <span>Stn: {selectedRoad.nearestStation.stationName}</span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Section 2: Flood Risk Assessment */}
+                <div className="p-2.5 rounded-2xl bg-[#070c18]/90 border border-slate-800/80 text-center space-y-1 shadow-sm">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                    Flood Risk Assessment
                   </div>
                   <div>
-                    <div className="text-xs sm:text-sm font-black tracking-tight text-white flex items-center gap-1.5">
-                      Baha Ba?
-                      <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-gradient-to-r from-pink-500/30 to-amber-500/30 text-pink-300 border border-pink-500/40">
-                        LIVE ALERT
-                      </span>
-                    </div>
-                    <div className="text-[9px] text-slate-400">Metro Manila Flood Telemetry</div>
-                  </div>
-                </div>
-
-                <div className="text-right">
-                  <div className="inline-flex items-center gap-1 text-[8px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    PAGASA + Panahon
-                  </div>
-                  <div className="text-[8px] text-slate-400 font-mono mt-0.5">{timestampStr}</div>
-                </div>
-              </div>
-
-              {/* Route or Selected Road Banner */}
-              {isRouteActive && origin && destination && activeRoute ? (
-                <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-2.5 space-y-1.5 shadow-md">
-                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Driving Route</span>
-                    <span className="text-blue-400 font-mono">{activeRoute.distanceKm} km • {activeRoute.durationMin} mins</span>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white font-black text-[9px] flex items-center justify-center flex-shrink-0">
-                        A
-                      </span>
-                      <strong className="text-slate-100 text-xs truncate">
-                        {origin.name}
-                      </strong>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="w-4 h-4 rounded-full bg-rose-600 text-white font-black text-[9px] flex items-center justify-center flex-shrink-0">
-                        B
-                      </span>
-                      <strong className="text-slate-100 text-xs truncate">
-                        {destination.name}
-                      </strong>
+                    <div
+                      className={`inline-block px-3 py-1 rounded-full text-xs font-black border tracking-wide shadow-md whitespace-normal break-words text-center ${statusColorClass}`}
+                    >
+                      {statusLabel}
                     </div>
                   </div>
-                </div>
-              ) : selectedRoad ? (
-                <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-2.5 space-y-1 shadow-md">
-                  <div className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider">
-                    Monitored Road Segment
-                  </div>
-                  <strong className="text-xs sm:text-sm font-bold text-white block truncate">
-                    {selectedRoad.roadName}
-                  </strong>
-                  <div className="text-[9px] text-slate-400 flex items-center gap-2 font-mono">
-                    <span>Elev: {selectedRoad.elevationMeters.toFixed(1)}m</span>
-                    <span>•</span>
-                    <span>Stn: {selectedRoad.nearestStation.stationName}</span>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Central Risk Pill Badge */}
-              <div className="p-2.5 sm:p-3 rounded-2xl bg-slate-950/95 border border-slate-800 text-center space-y-1 shadow-lg">
-                <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                  Flood Risk Assessment
-                </div>
-                <div
-                  className={`inline-block px-3 py-1 rounded-full text-xs font-black border tracking-wide shadow-md whitespace-normal break-words text-center ${statusColorClass}`}
-                >
-                  {statusLabel}
-                </div>
-                <div className="text-[10px] text-slate-300 font-mono flex items-center justify-center gap-3 pt-0.5">
-                  <span>
-                    Max Depth: <strong className="text-white text-[11px]">{maxDepthCm} cm</strong>
-                  </span>
-                  {activeRoute && (
+                  <div className="text-[10px] text-slate-300 font-mono flex items-center justify-center gap-3 pt-0.5">
                     <span>
-                      Flooded: <strong className="text-white text-[11px]">{activeRoute.totalFloodedKm} km</strong>
+                      Max Depth: <strong className="text-white text-[11px]">{maxDepthCm} cm</strong>
                     </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Map Snapshot Visual */}
-              <div className="relative w-full h-[170px] sm:h-[190px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center">
-                {capturingMap ? (
-                  <div className="flex flex-col items-center gap-2 text-slate-400 text-xs">
-                    <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-[10px]">Rendering map view...</span>
+                    {activeRoute && (
+                      <span>
+                        Flooded: <strong className="text-white text-[11px]">{activeRoute.totalFloodedKm} km</strong>
+                      </span>
+                    )}
                   </div>
-                ) : mapSnapshotUrl ? (
-                  <img
-                    src={mapSnapshotUrl}
-                    alt="Map snapshot"
-                    className="w-full h-full object-cover"
-                    crossOrigin="anonymous"
-                  />
-                ) : (
-                  <div className="text-slate-500 text-xs italic">Map snapshot preview</div>
+                </div>
+
+                {/* Section 3: Map Snapshot Visual */}
+                <div className="relative w-full h-[155px] sm:h-[170px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center shadow-inner">
+                  {capturingMap ? (
+                    <div className="flex flex-col items-center gap-2 text-slate-400 text-xs">
+                      <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-[10px]">Rendering map view...</span>
+                    </div>
+                  ) : mapSnapshotUrl ? (
+                    <img
+                      src={mapSnapshotUrl}
+                      alt="Map snapshot"
+                      className="w-full h-full object-cover"
+                      crossOrigin="anonymous"
+                    />
+                  ) : (
+                    <div className="text-slate-500 text-xs italic">Map snapshot preview</div>
+                  )}
+
+                  <div className="absolute bottom-1.5 left-1.5 bg-slate-950/80 backdrop-blur-md px-1.5 py-0.5 rounded text-[8px] font-mono text-cyan-300 border border-slate-800">
+                    🗺️ Live Basin View
+                  </div>
+                </div>
+
+                {/* Section 4: Passable Vehicles Section */}
+                <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2 space-y-1 shadow-sm">
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Passable Vehicles</div>
+                  <div className="flex flex-wrap gap-1">
+                    {passableVehicles.map((v: string, i: number) => (
+                      <span
+                        key={i}
+                        className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-[#131d35] text-slate-200 border border-slate-700/80 flex items-center gap-1"
+                      >
+                        <span>🚗</span> {v}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Advisories if present */}
+                {isRouteActive && activeRoute?.warnings && activeRoute.warnings.length > 0 && (
+                  <div className="text-[9px] text-amber-300 bg-amber-950/50 border border-amber-800/60 p-1.5 rounded-xl space-y-0.5">
+                    <div className="font-bold flex items-center gap-1 text-amber-400 text-[9px]">
+                      <span>⚠️</span> Route Advisories
+                    </div>
+                    {activeRoute.warnings.map((w, i) => (
+                      <div key={i}>• {w}</div>
+                    ))}
+                  </div>
                 )}
 
-                <div className="absolute bottom-2 left-2 bg-slate-950/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-slate-800 text-[8px] font-mono text-cyan-300">
-                  🗺️ Live Basin View
-                </div>
-              </div>
-
-              {/* Passable Vehicles Section */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-2 space-y-1 shadow-sm">
-                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Passable Vehicles</div>
-                <div className="flex flex-wrap gap-1">
-                  {passableVehicles.map((v: string, i: number) => (
-                    <span
-                      key={i}
-                      className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 border border-slate-700 flex items-center gap-1"
-                    >
-                      <span>🚗</span> {v}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Advisories if present */}
-              {isRouteActive && activeRoute?.warnings && activeRoute.warnings.length > 0 && (
-                <div className="text-[9px] text-amber-300 bg-amber-950/50 border border-amber-800/60 p-2 rounded-xl space-y-0.5">
-                  <div className="font-bold flex items-center gap-1 text-amber-400">
-                    <span>⚠️</span> Route Advisories
+                {/* Section 5: Link Sticker & Watermark */}
+                <div className="pt-1.5 border-t border-slate-800/80 flex flex-col items-center text-center space-y-0.5">
+                  <div className="inline-flex items-center gap-1 text-[9px] font-bold text-cyan-400 bg-cyan-950/80 border border-cyan-500/40 px-3 py-1 rounded-full shadow-md">
+                    <span>🔗</span> https://bahaba.nicolei.games
                   </div>
-                  {activeRoute.warnings.map((w, i) => (
-                    <div key={i}>• {w}</div>
-                  ))}
-                </div>
-              )}
-
-              {/* Instagram Story Footer / Link Sticker Callout */}
-              <div className="pt-1.5 border-t border-slate-800/80 flex flex-col items-center text-center space-y-0.5">
-                <div className="inline-flex items-center gap-1 text-[9px] font-bold text-cyan-400 bg-cyan-950/60 border border-cyan-500/40 px-2.5 py-0.5 rounded-full shadow-sm">
-                  <span>🔗</span> https://bahaba.nicolei.games
-                </div>
-                <div className="text-[8px] text-slate-500 font-mono">
-                  Baha Ba? • Open Flood Risk Navigation Engine
+                  <div className="text-[8px] text-slate-500 font-mono">
+                    Baha Ba? • Open Flood Risk Navigation Engine
+                  </div>
                 </div>
               </div>
             </div>
