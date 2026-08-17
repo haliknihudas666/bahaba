@@ -11,6 +11,7 @@ import {
   type GeoJSONLineStringFeature,
   type RoadRiskResult,
 } from "@/lib/engine/roadRisk";
+import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface RoadFloodLayerProps {
   /** Map instance reference from window.L */
@@ -109,6 +110,7 @@ export default function RoadFloodLayer({
 
     const renderLayers = () => {
       if (!map || !map._loaded) return;
+      patchLeafletBounds(L);
 
       try {
         // Ensure layer group exists and is attached to active map

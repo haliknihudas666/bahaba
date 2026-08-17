@@ -7,8 +7,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveStation } from "@/types";
 import RoadFloodLayer from "./RoadFloodLayer";
+import NOAHPredictedRoadsLayer from "./NOAHPredictedRoadsLayer";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
 import type { RouteSegmentData } from "@/lib/engine/routeSolver";
+import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface RoadFloodMapProps {
   /** Active PAGASA telemetry stations */
@@ -52,6 +54,7 @@ export default function RoadFloodMap({
     const initMap = () => {
       const L = (window as any).L;
       if (!L || leafletMapRef.current) return;
+      patchLeafletBounds(L);
 
       const map = L.map(mapContainerRef.current, {
         center: [14.633, 121.095], // Metro Manila Pasig-Marikina River Basin center
@@ -185,6 +188,7 @@ export default function RoadFloodMap({
 
     const renderRoute = () => {
       try {
+        patchLeafletBounds(L);
         const routeGroup = routeLayerGroupRef.current;
         if (!routeGroup || !map._loaded) return;
 
@@ -214,10 +218,9 @@ export default function RoadFloodMap({
 
           if (validFullCoords.length >= 2) {
             validFullCoords.forEach((c) => bounds.push(c));
-            const leafletLatLngs = validFullCoords.map(([lat, lng]) => L.latLng(lat, lng));
 
             // Outer Casing (Border)
-            L.polyline(leafletLatLngs, {
+            L.polyline(validFullCoords, {
               color: "#0f172a",
               weight: 9,
               opacity: 0.9,
@@ -227,7 +230,7 @@ export default function RoadFloodMap({
             }).addTo(routeGroup);
 
             // Base Driving Blue Polyline (Google Maps Style)
-            L.polyline(leafletLatLngs, {
+            L.polyline(validFullCoords, {
               color: "#2563eb", // Google Maps Driving Blue
               weight: 6,
               opacity: 0.9,
@@ -264,10 +267,9 @@ export default function RoadFloodMap({
             if (segment.depthCm > 5) {
               const isCritical = segment.severity === "CRITICAL";
               const isAlarm = segment.severity === "ALARM";
-              const segLatLngs = validCoords.map(([lat, lng]) => L.latLng(lat, lng));
 
               // Flooded Highlight Overlay Polyline
-              const highlightPolyline = L.polyline(segLatLngs, {
+              const highlightPolyline = L.polyline(validCoords, {
                 color: segment.color,
                 weight: isCritical ? 9 : isAlarm ? 8 : 7,
                 opacity: 0.95,
@@ -277,19 +279,51 @@ export default function RoadFloodMap({
                 noClip: true,
               });
 
+              const passableTags = (segment.passableVehicles || [])
+                .map((v) => `<span style="background-color: #f1f5f9; color: #1e293b; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 10px;">🚗 ${v}</span>`)
+                .join(" ");
+
               const popupHtml = `
-              <div style="font-family: system-ui, -apple-system, sans-serif; padding: 6px; color: #0f172a; min-width: 200px;">
+              <div style="font-family: system-ui, -apple-system, sans-serif; padding: 8px; color: #0f172a; min-width: 220px; max-width: 280px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
-                  <strong style="font-size: 13px;">⚠️ Flood Hazard Highlight</strong>
-                  <span style="font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background-color: ${segment.color}; color: #ffffff;">
+                  <strong style="font-size: 13px; color: #0f172a;">⚠️ Route Flood Inundation</strong>
+                  <span style="font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 9999px; background-color: ${segment.color}; color: #ffffff;">
                     ${segment.severity}
                   </span>
                 </div>
-                <div style="font-size: 11px; color: #334155; line-height: 1.4;">
-                  <div>Predicted Flood Depth: <strong style="color: ${segment.color};">${segment.depthCm} cm</strong></div>
-                  <div>Nearest Telemetry Station: <strong>${segment.nearestStationName}</strong></div>
-                  <div>Distance to Station: <span>${segment.nearestStationDistanceKm} km</span></div>
+
+                <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 11px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                    <span style="color: #64748b;">Predicted Water Depth:</span>
+                    <strong style="font-size: 13px; color: ${segment.color}; font-family: monospace;">
+                      ${segment.depthCm} cm
+                    </strong>
+                  </div>
+                  <div style="font-size: 10px; color: #64748b;">(${segment.depthCategory || "Calculated Inundation"})</div>
                 </div>
+
+                <div style="font-size: 11px; color: #334155; line-height: 1.5; border-bottom: 1px dashed #e2e8f0; padding-bottom: 6px; margin-bottom: 6px;">
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #64748b;">Road Elevation:</span>
+                    <strong>${segment.elevationM !== undefined ? `${segment.elevationM.toFixed(1)} m ASL` : "DEM Model"}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #64748b;">Rainfall Intensity:</span>
+                    <strong style="color: #0284c7;">${segment.rainMmHr !== undefined ? `${segment.rainMmHr.toFixed(1)} mm/hr` : "Live Telemetry"}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #64748b;">Telemetry Station:</span>
+                    <span style="font-size: 10px;">${segment.nearestStationName} (${segment.nearestStationDistanceKm} km)</span>
+                  </div>
+                </div>
+
+                ${passableTags ? `
+                <div style="font-size: 10px;">
+                  <span style="color: #64748b; font-weight: 600; display: block; margin-bottom: 3px;">Passable Vehicles:</span>
+                  <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                    ${passableTags}
+                  </div>
+                </div>` : ""}
               </div>
             `;
 
@@ -381,14 +415,17 @@ export default function RoadFloodMap({
       {/* Map Container */}
       <div ref={mapContainerRef} className="w-full h-full min-h-[460px] z-0" />
 
-      {/* Embedded Road Flood Overlay */}
+      {/* Embedded Road Flood Overlay & NOAH BBox Vector Layer */}
       {mapLoaded && leafletMapRef.current && (
-        <RoadFloodLayer
-          map={leafletMapRef.current}
-          stations={stations}
-          roads={customRoads}
-          onSelectRoad={onSelectRoad}
-        />
+        <>
+          <RoadFloodLayer
+            map={leafletMapRef.current}
+            stations={stations}
+            roads={customRoads}
+            onSelectRoad={onSelectRoad}
+          />
+          <NOAHPredictedRoadsLayer map={leafletMapRef.current} />
+        </>
       )}
 
       {/* Dynamic Map Legend Overlay */}

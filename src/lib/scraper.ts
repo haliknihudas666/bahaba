@@ -415,8 +415,10 @@ export function getCompositeRisk(
   return "UNKNOWN";
 }
 
+import { fetchPanahonRainfallStations } from "./panahon-scraper";
+
 // ---------------------------------------------------------------------------
-// Orchestrator – run both fetchers in parallel, merge, and return
+// Orchestrator – run all telemetry fetchers in parallel, merge, and return
 // ---------------------------------------------------------------------------
 
 export async function ingestTelemetry(): Promise<ScrapeResult> {
@@ -425,14 +427,30 @@ export async function ingestTelemetry(): Promise<ScrapeResult> {
   try {
     const client = createHttpClient();
 
-    // Fire all three data sources concurrently
-    const [rainfall, waterLevels, coordMap] = await Promise.all([
+    // Fire all data sources concurrently (PAGASA FFWS + Panahon AWS)
+    const [rainfallRes, waterLevelsRes, coordMapRes, panahonStationsRes] = await Promise.allSettled([
       fetchRainfall(client),
       fetchWaterLevel(client),
-      fetchMapCoordinates(client).catch(() => ({} as StationCoordMap)),
+      fetchMapCoordinates(client),
+      fetchPanahonRainfallStations(),
     ]);
 
-    const stations = mergeStationData(rainfall, waterLevels, coordMap);
+    const rainfall = rainfallRes.status === "fulfilled" ? rainfallRes.value : [];
+    const waterLevels = waterLevelsRes.status === "fulfilled" ? waterLevelsRes.value : [];
+    const coordMap = coordMapRes.status === "fulfilled" ? coordMapRes.value : ({} as StationCoordMap);
+    const panahonStations = panahonStationsRes.status === "fulfilled" ? panahonStationsRes.value : [];
+
+    const ffwsStations = mergeStationData(rainfall, waterLevels, coordMap);
+
+    // Merge FFWS stations with Panahon AWS stations
+    // Prevent duplicate stations if named similarly
+    const existingStationNames = new Set(ffwsStations.map((s) => s.stationName.toLowerCase().trim()));
+    const additionalPanahonStations = panahonStations.filter(
+      (p) => !existingStationNames.has(p.stationName.toLowerCase().trim())
+    );
+
+    const stations = [...ffwsStations, ...additionalPanahonStations];
+    stations.sort((a, b) => a.stationName.localeCompare(b.stationName));
 
     return {
       success: true,
@@ -441,7 +459,7 @@ export async function ingestTelemetry(): Promise<ScrapeResult> {
       rainfall,
       waterLevels,
       meta: {
-        rainfallRowCount: rainfall.length,
+        rainfallRowCount: rainfall.length + additionalPanahonStations.length,
         waterLevelRowCount: waterLevels.length,
         durationMs: Date.now() - start,
       },
@@ -465,3 +483,4 @@ export async function ingestTelemetry(): Promise<ScrapeResult> {
     };
   }
 }
+

@@ -15,9 +15,13 @@ import {
   fetchAndEvaluateRoute,
   type RouteOption,
 } from "@/lib/engine/routeSolver";
-import { type RoadRiskResult, type RoadSeverity } from "@/lib/engine/roadRisk";
+import { type RoadRiskResult, type RoadSeverity, calculateHaversineDistance } from "@/lib/engine/roadRisk";
+import { calculateWaterDepth, classifyFloodRisk } from "@/lib/engine/floodPredictor";
+import noahRoadsDataset from "@/lib/data/noah-roads.json";
 import { getStationCoords, slugifyStationId } from "@/lib/firebase/station-coords";
 import type { LiveStation, ScrapeResult } from "@/types";
+import type { NoahRoadSegment } from "@/types/flood-engine";
+
 
 export default function HomePage() {
   const { stations: firestoreStations, loading: firestoreLoading } = useLiveFloodStatus();
@@ -144,43 +148,25 @@ export default function HomePage() {
           (s) => s.stationName.toLowerCase() === seg.nearestStationName.toLowerCase()
         );
 
-        const depthCategory =
-          seg.depthCm > 30
-            ? "Waist Deep+"
-            : seg.depthCm > 15
-            ? "Half-Tire Deep"
-            : seg.depthCm > 5
-            ? "Gutter Deep"
-            : "Normal / Clear";
-
-        const drivableVehicles =
-          seg.depthCm > 30
-            ? ["Truck / Heavy 4x4"]
-            : seg.depthCm > 15
-            ? ["SUV / Pickup", "Truck / Heavy 4x4"]
-            : seg.depthCm > 5
-            ? ["Sedan / Compact", "SUV / Pickup", "Truck / Heavy 4x4"]
-            : ["All Vehicles (Sedan, Motorcycle, SUV)"];
-
         const midCoord = seg.coordinates[Math.floor(seg.coordinates.length / 2)] || [14.6, 121.0];
 
         return {
           roadName: `${activeRoute.summary} (Segment ${idx + 1})`,
-          elevationMeters: 12.0,
+          elevationMeters: seg.elevationM,
           severity: seg.severity,
           color: seg.color,
           lineWeight: seg.severity === "CRITICAL" ? 6 : 4,
           estimatedDepthCm: seg.depthCm,
-          depthCategory,
+          depthCategory: seg.depthCategory as any,
           nearestStation: {
             stationId: matchingStation?.stationId || "station-na",
             stationName: seg.nearestStationName,
             distanceKm: seg.nearestStationDistanceKm,
             waterLevel: matchingStation?.waterLevel ?? 0,
-            rain1h: matchingStation?.rain1h ?? 0,
+            rain1h: seg.rainMmHr,
             delta1h: matchingStation?.waterLevelDelta1h ?? 0,
           },
-          drivableVehicles,
+          drivableVehicles: seg.passableVehicles,
           hazardScore: seg.hazardScore,
           centroid: midCoord,
           isNearRiver: false,
@@ -188,71 +174,90 @@ export default function HomePage() {
       });
     }
 
-    return activeStations.map((st) => {
-      const isCritical = st.riskLevel === "CRITICAL" || st.waterRiskLevel === "CRITICAL";
-      const isAlarm = st.riskLevel === "ALARM" || st.waterRiskLevel === "ALARM";
-      const isAlert = st.riskLevel === "ALERT" || st.waterRiskLevel === "ALERT";
+    // Default: Evaluate all monitored Metro Manila roads (España, EDSA, Shaw, Taft, etc.)
+    const roads = noahRoadsDataset as NoahRoadSegment[];
+    return roads.map((road) => {
+      // 1. Calculate road centroid [lat, lng]
+      let sumLat = 0;
+      let sumLng = 0;
+      road.coordinates.forEach(([lng, lat]) => {
+        sumLat += lat;
+        sumLng += lng;
+      });
+      const centLat = sumLat / road.coordinates.length;
+      const centLng = sumLng / road.coordinates.length;
 
-      const severity: RoadSeverity = isCritical
-        ? "CRITICAL"
-        : isAlarm
-        ? "ALARM"
-        : isAlert
-        ? "ALERT"
-        : "NORMAL";
+      // 2. Find nearest weather telemetry station (PAGASA FFWS or Panahon AWS)
+      let nearestSt: LiveStation | null = null;
+      let minDist = Infinity;
 
-      const estimatedDepthCm = isCritical ? 45 : isAlarm ? 25 : isAlert ? 10 : 0;
+      if (activeStations && activeStations.length > 0) {
+        for (const st of activeStations) {
+          if (!st.latitude || !st.longitude) continue;
+          const d = calculateHaversineDistance(centLat, centLng, st.latitude, st.longitude);
+          if (d < minDist) {
+            minDist = d;
+            nearestSt = st;
+          }
+        }
+      }
 
-      const color =
-        severity === "CRITICAL"
-          ? "#7f1d1d"
-          : severity === "ALARM"
-          ? "#ef4444"
-          : severity === "ALERT"
-          ? "#f97316"
-          : "#00b4d8";
+      const rain1h = nearestSt?.rain1h ?? 0;
+      const rain24h = nearestSt?.rain24h ?? 0;
+      const distWeight = Math.exp(-minDist / 8.0);
+      const effectiveRain1h = Math.round(rain1h * distWeight * 10) / 10;
+      const effectiveRain24h = Math.round(rain24h * distWeight * 10) / 10;
 
-      const depthCategory =
-        estimatedDepthCm > 30
-          ? "Waist Deep+"
-          : estimatedDepthCm > 15
-          ? "Half-Tire Deep"
-          : estimatedDepthCm > 5
-          ? "Gutter Deep"
-          : "Normal / Clear";
+      // 3. Compute predicted water depth
+      const depthCm = calculateWaterDepth(
+        effectiveRain1h,
+        effectiveRain24h,
+        road.noahHazardLevel,
+        road.elevationM,
+        road.drainageCapacity
+      );
 
-      const drivableVehicles =
-        estimatedDepthCm > 30
-          ? ["Truck / Heavy 4x4"]
-          : estimatedDepthCm > 15
-          ? ["SUV / Pickup", "Truck / Heavy 4x4"]
-          : estimatedDepthCm > 5
-          ? ["Sedan / Compact", "SUV / Pickup", "Truck / Heavy 4x4"]
-          : ["All Vehicles (Sedan, Motorcycle, SUV)"];
+      const classification = classifyFloodRisk(depthCm);
+      const severity: RoadSeverity =
+        classification.category === "NORMAL"
+          ? "NORMAL"
+          : classification.category === "LOW"
+          ? "ALERT"
+          : classification.category === "HIGH"
+          ? "ALARM"
+          : "CRITICAL";
+
+      const rainFactor = Math.min(1.0, effectiveRain1h / 30.0);
+      const depthFactor = Math.min(1.0, depthCm / 50.0);
+      const elevFactor = Math.max(0, 1.0 - road.elevationM / 20.0);
+      const hazardScore = Math.round(
+        Math.min(100, (rainFactor * 0.35 + depthFactor * 0.45 + elevFactor * 0.20) * 100)
+      );
 
       return {
-        roadName: `${st.stationName} Vicinity Corridor`,
-        elevationMeters: 10.0,
+        roadName: road.name,
+        elevationMeters: road.elevationM,
         severity,
-        color,
-        lineWeight: 4,
-        estimatedDepthCm,
-        depthCategory,
+        color: depthCm <= 5 ? "#00b4d8" : classification.color,
+        lineWeight: severity === "CRITICAL" ? 6 : 4,
+        estimatedDepthCm: depthCm,
+        depthCategory: classification.label as any,
         nearestStation: {
-          stationId: st.stationId,
-          stationName: st.stationName,
-          distanceKm: 0.2,
-          waterLevel: st.waterLevel,
-          rain1h: st.rain1h,
-          delta1h: st.waterLevelDelta1h,
+          stationId: nearestSt?.stationId ?? "station-none",
+          stationName: nearestSt?.stationName ?? "Weather Telemetry",
+          distanceKm: Number(minDist.toFixed(1)),
+          waterLevel: nearestSt?.waterLevel ?? 0,
+          rain1h: effectiveRain1h,
+          delta1h: nearestSt?.waterLevelDelta1h ?? 0,
         },
-        drivableVehicles,
-        hazardScore: isCritical ? 90 : isAlarm ? 65 : isAlert ? 35 : 5,
-        centroid: [st.latitude, st.longitude] as [number, number],
-        isNearRiver: false,
+        drivableVehicles: classification.passableVehicles,
+        hazardScore,
+        centroid: [centLat, centLng],
+        isNearRiver: minDist <= 0.5,
       };
     });
   }, [activeRoute, activeStations]);
+
 
   // Filtered road predictions table dataset
   const filteredRoadEvaluations = useMemo(() => {
@@ -335,8 +340,9 @@ export default function HomePage() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span>PAGASA Telemetry</span>
+              <span>PAGASA + Panahon AWS</span>
             </div>
+
 
             {/* Sync Button */}
             <button

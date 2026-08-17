@@ -136,3 +136,13 @@ export interface FloodEstimation {
   /** Intermediate features (useful for debugging / explainability) */
   features: FloodFeatures;
 }
+
+export interface NoahRoadSegment {
+  id: string;
+  name: string;
+  coordinates: [number, number][]; // [[lng, lat], ...]
+  elevationM: number;
+  noahHazardLevel: number;
+  drainageCapacity: number;
+}
+

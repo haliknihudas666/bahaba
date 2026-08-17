@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from "react";
 import type { LiveStation } from "@/types";
+import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface FloodMapProps {
   stations: LiveStation[];
@@ -39,6 +40,7 @@ export default function FloodMap({
     const initMap = () => {
       const L = (window as any).L;
       if (!L) return;
+      patchLeafletBounds(L);
 
       if (!leafletMap.current && mapRef.current) {
         // Center on Metro Manila / Marikina River basin (14.633, 121.095)
