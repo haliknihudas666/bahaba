@@ -17,6 +17,8 @@ interface RoadFloodMapProps {
   stations: LiveStation[];
   /** Selected station ID for focus */
   selectedStationId?: string | null;
+  /** Selected road risk metadata for focus & highlight */
+  selectedRoad?: RoadRiskResult | null;
   /** Selected road risk metadata callback */
   onSelectRoad?: (road: RoadRiskResult) => void;
   /** Full continuous OSRM route polyline [lat, lng][] */
@@ -34,6 +36,7 @@ interface RoadFloodMapProps {
 export default function RoadFloodMap({
   stations,
   selectedStationId,
+  selectedRoad,
   onSelectRoad,
   fullRoutePolyline = [],
   routeSegments = [],
@@ -70,6 +73,7 @@ export default function RoadFloodMap({
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
           subdomains: "abcd",
           maxZoom: 19,
+          crossOrigin: true,
         }
       ).addTo(map);
 
@@ -177,6 +181,67 @@ export default function RoadFloodMap({
 
     map.whenReady(renderMarkers);
   }, [stations, selectedStationId, mapLoaded]);
+
+  const selectedRoadMarkerRef = useRef<any>(null);
+
+  // 2B. Focus on Selected Road Corridor with smooth camera flyTo and radar beacon
+  useEffect(() => {
+    const L = (window as any).L;
+    const map = leafletMapRef.current;
+    if (!L || !map || !mapLoaded || !map._loaded) return;
+
+    if (selectedRoadMarkerRef.current) {
+      try {
+        selectedRoadMarkerRef.current.remove();
+      } catch {}
+      selectedRoadMarkerRef.current = null;
+    }
+
+    if (selectedRoad?.centroid) {
+      const [lat, lng] = selectedRoad.centroid;
+      if (typeof lat === "number" && typeof lng === "number" && !isNaN(lat) && !isNaN(lng)) {
+        try {
+          map.flyTo([lat, lng], 15, {
+            animate: true,
+            duration: 0.8,
+          });
+
+          const beaconIcon = L.divIcon({
+            className: "custom-road-focus-marker",
+            html: `
+              <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+                <div style="position: absolute; width: 50px; height: 50px; border-radius: 50%; background-color: ${selectedRoad.color}; opacity: 0.4; animation: ping 1.5s infinite;"></div>
+                <div style="
+                  background-color: #0f172a;
+                  color: #ffffff;
+                  border: 2px solid ${selectedRoad.color};
+                  font-weight: 800;
+                  font-size: 11px;
+                  padding: 4px 8px;
+                  border-radius: 9999px;
+                  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+                  white-space: nowrap;
+                  display: flex;
+                  align-items: center;
+                  gap: 4px;
+                ">
+                  <span>🛣️</span>
+                  <span style="color: ${selectedRoad.color};">${selectedRoad.estimatedDepthCm} cm</span>
+                </div>
+              </div>
+            `,
+            iconSize: [60, 30],
+            iconAnchor: [30, 15],
+          });
+
+          const marker = L.marker([lat, lng], { icon: beaconIcon, zIndexOffset: 1000 }).addTo(map);
+          selectedRoadMarkerRef.current = marker;
+        } catch (err) {
+          console.warn("[RoadFocus flyTo error]", err);
+        }
+      }
+    }
+  }, [selectedRoad, mapLoaded]);
 
   const lastFittedKeyRef = useRef<string>("");
 
@@ -411,7 +476,7 @@ export default function RoadFloodMap({
   }, [fullRoutePolyline, routeSegments, originCoords, destinationCoords, mapLoaded]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
+    <div id="bahaba-interactive-map" className="relative w-full h-full min-h-[460px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
       {/* Map Container */}
       <div ref={mapContainerRef} className="w-full h-full min-h-[460px] z-0" />
 

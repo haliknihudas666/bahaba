@@ -11,6 +11,7 @@ import RoadFloodMap from "@/components/Map/RoadFloodMap";
 import LocationAutocomplete from "@/components/LocationAutocomplete";
 import StationTable from "@/components/StationTable";
 import NearestStationFinder from "@/components/NearestStationFinder";
+import ShareModal from "@/components/ShareModal";
 import {
   fetchAndEvaluateRoute,
   type RouteOption,
@@ -29,6 +30,7 @@ export default function HomePage() {
   const [syncing, setSyncing] = useState(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
 
   // Table selector state below map: "station-telemetry" or "road-predictions"
   const [activeTableTab, setActiveTableTab] = useState<"station-telemetry" | "road-predictions">("station-telemetry");
@@ -311,6 +313,28 @@ export default function HomePage() {
     setDestLoc(temp);
   };
 
+  // Focus Map on Selected Monitored Road Corridor
+  const handleSelectRoad = (road: RoadRiskResult) => {
+    setSelectedRoadRisk(road);
+    const mapElement = document.getElementById("bahaba-interactive-map");
+    if (mapElement) {
+      mapElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  };
+
+  // Focus Map First, let camera fly to the road, then Open Share Modal
+  const handleFocusAndShareRoad = (road: RoadRiskResult) => {
+    setSelectedRoadRisk(road);
+    const mapElement = document.getElementById("bahaba-interactive-map");
+    if (mapElement) {
+      mapElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    // Delay opening the modal to allow smooth map flyTo animation & tile loading to settle
+    setTimeout(() => {
+      setIsShareModalOpen(true);
+    }, 750);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* ── Top Header Bar ────────────────────────────────────────────── */}
@@ -343,6 +367,17 @@ export default function HomePage() {
               <span>PAGASA + Panahon AWS</span>
             </div>
 
+
+            {/* Share Report Button */}
+            <button
+              onClick={() => setIsShareModalOpen(true)}
+              className="flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 hover:border-cyan-500/60 shadow-md transition-all active:scale-95"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              <span>Share Report</span>
+            </button>
 
             {/* Sync Button */}
             <button
@@ -564,6 +599,7 @@ export default function HomePage() {
               <RoadFloodMap
                 stations={activeStations}
                 selectedStationId={selectedStationId}
+                selectedRoad={selectedRoadRisk}
                 originCoords={originLoc.coords}
                 destinationCoords={destLoc.coords}
                 fullRoutePolyline={activeRoute?.geometry}
@@ -587,22 +623,34 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span
-                    className={`font-black text-xs px-3 py-1 rounded-full border ${activeRoute.overallStatus === "SAFE"
-                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                      : activeRoute.overallStatus === "CAUTION"
-                        ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
-                        : activeRoute.overallStatus === "HIGH_RISK"
-                          ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
-                          : "bg-rose-500/20 text-rose-400 border-rose-500/40"
-                      }`}
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={() => setIsShareModalOpen(true)}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 hover:border-cyan-500/50 shadow-sm transition-all"
+                    title="Share this route & flood assessment"
                   >
-                    {activeRoute.overallStatus === "SAFE" && "✅ SAFE / CLEAR"}
-                    {activeRoute.overallStatus === "CAUTION" && "⚠️ GUTTER DEEP WARNING"}
-                    {activeRoute.overallStatus === "HIGH_RISK" && "🚨 HALF-TIRE ALARM"}
-                    {activeRoute.overallStatus === "IMPASSABLE" && "⛔ IMPASSABLE FLOOD"}
-                  </span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  </button>
+
+                  <div className="text-right">
+                    <span
+                      className={`font-black text-xs px-3 py-1 rounded-full border ${activeRoute.overallStatus === "SAFE"
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        : activeRoute.overallStatus === "CAUTION"
+                          ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                          : activeRoute.overallStatus === "HIGH_RISK"
+                            ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                            : "bg-rose-500/20 text-rose-400 border-rose-500/40"
+                        }`}
+                    >
+                      {activeRoute.overallStatus === "SAFE" && "✅ SAFE / CLEAR"}
+                      {activeRoute.overallStatus === "CAUTION" && "⚠️ GUTTER DEEP WARNING"}
+                      {activeRoute.overallStatus === "HIGH_RISK" && "🚨 HALF-TIRE ALARM"}
+                      {activeRoute.overallStatus === "IMPASSABLE" && "⛔ IMPASSABLE FLOOD"}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -734,6 +782,7 @@ export default function HomePage() {
                       <th className="px-4 py-3 font-semibold">Nearest PAGASA Station</th>
                       <th className="px-4 py-3 font-semibold">Station Hydro Signal</th>
                       <th className="px-4 py-3 font-semibold">Passable Vehicles</th>
+                      <th className="px-4 py-3 font-semibold text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/80 bg-slate-900/40">
@@ -741,7 +790,7 @@ export default function HomePage() {
                       filteredRoadEvaluations.map((road, idx) => (
                         <tr
                           key={idx}
-                          onClick={() => setSelectedRoadRisk(road)}
+                          onClick={() => handleSelectRoad(road)}
                           className={`hover:bg-slate-800/70 transition-colors cursor-pointer ${selectedRoadRisk?.roadName === road.roadName ? "bg-slate-800/90" : ""
                             }`}
                         >
@@ -799,11 +848,26 @@ export default function HomePage() {
                               ))}
                             </div>
                           </td>
+
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFocusAndShareRoad(road);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 hover:border-cyan-500/50 shadow-sm transition-all"
+                              title="Focus map on this corridor & share report"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                              </svg>
+                            </button>
+                          </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={7} className="px-4 py-6 text-center text-slate-500 italic text-xs">
+                        <td colSpan={8} className="px-4 py-6 text-center text-slate-500 italic text-xs">
                           No road segments match the selected filters.
                         </td>
                       </tr>
@@ -828,6 +892,17 @@ export default function HomePage() {
         <p>🌊 Bahaba – Metro Manila Driving Directions & Hydrological Flood Monitoring System</p>
         <p>Data powered by PAGASA / DOST Telemetry feeds, OSRM Driving Engine & Leaflet Canvas</p>
       </footer>
+
+      {/* ── Share Modal ────────────────────────────────────────────── */}
+      <ShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        origin={originLoc.name ? originLoc : null}
+        destination={destLoc.name ? destLoc : null}
+        activeRoute={activeRoute}
+        metrics={metrics}
+        selectedRoad={selectedRoadRisk}
+      />
     </div>
   );
 }
