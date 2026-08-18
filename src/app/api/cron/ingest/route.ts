@@ -50,7 +50,7 @@ function parseFirestoreTimestamp(val: unknown): Date | null {
 
 /**
  * Retrieve the most recent sync timestamp from Firestore.
- * Checks `sync_meta/telemetry`, falling back to `telemetry_history` and `stations`.
+ * Checks `sync_meta/telemetry`, falling back to `stations`.
  */
 async function getLastSyncTimestamp(): Promise<Date | null> {
   if (!adminDb) return null;
@@ -64,20 +64,7 @@ async function getLastSyncTimestamp(): Promise<Date | null> {
       if (lastSynced) return lastSynced;
     }
 
-    // 2. Secondary check: Latest document in telemetry_history
-    const historySnap = await adminDb
-      .collection("telemetry_history")
-      .orderBy("timestamp", "desc")
-      .limit(1)
-      .get();
-
-    if (!historySnap.empty) {
-      const data = historySnap.docs[0].data();
-      const historyTime = parseFirestoreTimestamp(data?.timestamp);
-      if (historyTime) return historyTime;
-    }
-
-    // 3. Fallback check: Latest lastUpdated in stations
+    // 2. Fallback check: Latest lastUpdated in stations
     const stationSnap = await adminDb
       .collection("stations")
       .orderBy("lastUpdated", "desc")
@@ -97,11 +84,12 @@ async function getLastSyncTimestamp(): Promise<Date | null> {
 }
 
 /**
- * Execute Firestore dual-pipeline write for scraped station telemetry.
- * Skips saving to Firestore if the last sync was less than 30 minutes ago.
+ * Execute Firestore write pipeline for scraped station telemetry.
+ * Skips saving to Firestore if the last sync was less than 30 minutes ago (unless force is true).
  */
 async function persistTelemetryToFirestore(
   stations: StationTelemetry[],
+  force: boolean = false,
 ): Promise<FirestorePersistResult> {
   if (!stations || stations.length === 0 || !adminDb) {
     return { persistedCount: 0 };
@@ -109,26 +97,28 @@ async function persistTelemetryToFirestore(
 
   try {
     // ── Check if last sync was within the last 30 minutes ─────────────────
-    const lastSyncDate = await getLastSyncTimestamp();
-    if (lastSyncDate) {
-      const now = Date.now();
-      const elapsedMs = now - lastSyncDate.getTime();
+    if (!force) {
+      const lastSyncDate = await getLastSyncTimestamp();
+      if (lastSyncDate) {
+        const now = Date.now();
+        const elapsedMs = now - lastSyncDate.getTime();
 
-      // If last sync was less than 30 minutes ago, skip saving to Firebase
-      if (elapsedMs >= 0 && elapsedMs < MIN_SYNC_INTERVAL_MS) {
-        const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-        const remainingMinutes = Math.ceil((MIN_SYNC_INTERVAL_MS - elapsedMs) / 60_000);
-        const reason = `Last sync was ${elapsedMinutes}m ago (< 30m). Next sync allowed in ~${remainingMinutes}m.`;
+        // If last sync was less than 30 minutes ago, skip saving to Firebase
+        if (elapsedMs >= 0 && elapsedMs < MIN_SYNC_INTERVAL_MS) {
+          const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+          const remainingMinutes = Math.ceil((MIN_SYNC_INTERVAL_MS - elapsedMs) / 60_000);
+          const reason = `Last sync was ${elapsedMinutes}m ago (< 30m). Next sync allowed in ~${remainingMinutes}m.`;
 
-        console.log(`[Firestore Ingest] Skipping save to Firebase: ${reason}`);
+          console.log(`[Firestore Ingest] Skipping save to Firebase: ${reason}`);
 
-        return {
-          persistedCount: 0,
-          skipped: true,
-          reason,
-          lastSyncedAt: lastSyncDate.toISOString(),
-          elapsedMinutes,
-        };
+          return {
+            persistedCount: 0,
+            skipped: true,
+            reason,
+            lastSyncedAt: lastSyncDate.toISOString(),
+            elapsedMinutes,
+          };
+        }
       }
     }
 
@@ -136,6 +126,7 @@ async function persistTelemetryToFirestore(
     const { FieldValue, GeoPoint } = require("firebase-admin/firestore");
 
     const batch = adminDb.batch();
+    const summaryStationsList = [];
 
     for (const st of stations) {
       const stationId = slugifyStationId(st.stationName);
@@ -151,20 +142,24 @@ async function persistTelemetryToFirestore(
       const waterLevel = st.waterLevel?.currentLevel ?? 0;
       const waterLevelDelta1h = st.waterLevel?.change1hr ?? 0;
 
-      // Pipeline A: Historical Time-Series Document
-      const historyRef = adminDb.collection("telemetry_history").doc();
-      batch.set(historyRef, {
+      // Add to consolidated array for single-document O(1) reads
+      summaryStationsList.push({
         stationId,
         stationName: st.stationName,
+        coordinates: { latitude: lat, longitude: lng },
+        geohash,
         rain10m,
         rain1h,
         rain24h,
         waterLevel,
         waterLevelDelta1h,
-        timestamp: FieldValue.serverTimestamp(),
+        waterRiskLevel: st.waterRiskLevel,
+        rainRiskLevel: st.rainRiskLevel,
+        riskLevel: st.riskLevel,
+        lastUpdated: new Date().toISOString(),
       });
 
-      // Pipeline B: Active Station Snapshot Document
+      // Pipeline: Active Station Snapshot Document
       const stationRef = adminDb.collection("stations").doc(stationId);
       batch.set(
         stationRef,
@@ -187,7 +182,7 @@ async function persistTelemetryToFirestore(
       );
     }
 
-    // Pipeline C: Update Sync Metadata Document
+    // Consolidated Sync Metadata & Telemetry Snapshot Document
     const syncMetaRef = adminDb.collection("sync_meta").doc("telemetry");
     batch.set(
       syncMetaRef,
@@ -196,6 +191,7 @@ async function persistTelemetryToFirestore(
         stationCount: stations.length,
         status: "SUCCESS",
         updatedAtIso: new Date().toISOString(),
+        stations: summaryStationsList,
       },
       { merge: true },
     );
@@ -217,14 +213,24 @@ async function persistTelemetryToFirestore(
 // GET /api/cron/ingest
 // ---------------------------------------------------------------------------
 
-export async function GET(): Promise<NextResponse<ScrapeResult>> {
+export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
+  let force = false;
+  if (req && req.url) {
+    try {
+      const url = new URL(req.url);
+      force = url.searchParams.get("force") === "true" || req.headers.get("x-force-sync") === "true";
+    } catch {
+      // ignore
+    }
+  }
+
   // ── Run telemetry scraping ──────────────────────────────────────────────
   const result = await ingestTelemetry();
 
   // ── Firestore Persistence Pipeline ──────────────────────────────────────
   let firestoreMeta: FirestorePersistResult = { persistedCount: 0 };
   if (result.success && result.stations.length > 0) {
-    firestoreMeta = await persistTelemetryToFirestore(result.stations);
+    firestoreMeta = await persistTelemetryToFirestore(result.stations, force);
   }
 
   // Return 502 when upstream scrape failed

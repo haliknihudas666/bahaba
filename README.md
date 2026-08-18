@@ -21,7 +21,7 @@
 ### 📡 Dual Live Telemetry Ingestion Pipeline
 - **PAGASA FFWS Scraper**: Scrapes 10-minute rainfall and water-level readings from the Pasig-Marikina-Tullahan Flood Forecasting & Warning System internal AJAX APIs.
 - **DOST-PAGASA Panahon AWS Scraper**: Scrapes nationwide Automated Weather Station (AWS) network data via authenticated session handshakes to monitor hourly and 24-hour rainfall accumulation across Metro Manila and surrounding catchments.
-- **Throttled Cron Ingestion (`/api/cron/ingest`)**: Automatic 30-minute deduplication throttling with override support (`?force=true` or `x-force-sync: true`), writing time-series records to `telemetry_history` and active snapshots to `stations`.
+- **Throttled Cron Ingestion (`/api/cron/ingest`)**: Automatic 30-minute deduplication throttling with override support (`?force=true` or `x-force-sync: true`), persisting consolidated telemetry snapshots to `sync_meta` and active snapshots to `stations`.
 
 ### 🧠 Dual-Signal Hydrological Flood Risk Engine
 - **Pluvial-Primary Urban Modeling**: Calibrated to Metro Manila urban hydrology where road surface flooding is overwhelmingly pluvial (rainfall exceeding storm drain capacity) rather than river overflow.
@@ -78,7 +78,7 @@ flowchart TD
     subgraph Ingestion_Persistence["Ingestion & Persistence"]
         CRON["/api/cron/ingest Endpoint\n(30-Min Throttled Sync)"]
         SCRAPER["Dual Scraper Engine\n(PAGASA FFWS + Panahon)"]
-        FIRESTORE[("Cloud Firestore\n• stations\n• telemetry_history\n• sync_meta")]
+        FIRESTORE[("Cloud Firestore\n• sync_meta (snapshot)\n• stations")]
     end
 
     subgraph Risk_Navigation_Engine["Hydrological & Navigation Engine"]

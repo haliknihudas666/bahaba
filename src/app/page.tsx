@@ -35,8 +35,12 @@ import type { NoahRoadSegment } from "@/types/flood-engine";
 
 
 export default function HomePage() {
-  const { stations: firestoreStations, loading: firestoreLoading } = useLiveFloodStatus();
-  const [fallbackStations, setFallbackStations] = useState<LiveStation[]>([]);
+  const {
+    stations: activeStations,
+    loading: firestoreLoading,
+    source: telemetrySource,
+    refreshScraper,
+  } = useLiveFloodStatus();
   const [syncing, setSyncing] = useState<boolean>(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -89,47 +93,11 @@ export default function HomePage() {
     setSyncing(true);
     trackTelemetrySync();
     try {
-      const res = await fetch("/api/cron/ingest");
-      if (res.ok) {
-        const data: ScrapeResult = await res.json();
-        if (data.stations && data.stations.length > 0) {
-          const mapped: LiveStation[] = data.stations.map((st) => {
-            const fallbackCoords = getStationCoords(st.stationName);
-            return {
-              stationId: slugifyStationId(st.stationName),
-              stationName: st.stationName,
-              latitude: st.latitude ?? fallbackCoords.lat,
-              longitude: st.longitude ?? fallbackCoords.lng,
-              geohash: "",
-              rain10m: st.rainfall?.rain10min ?? 0,
-              rain1h: st.rainfall?.rain1hr ?? 0,
-              rain24h: st.rainfall?.rain24hr ?? 0,
-              waterLevel: st.waterLevel?.currentLevel ?? 0,
-              waterLevelDelta1h: st.waterLevel?.change1hr ?? 0,
-              waterRiskLevel: st.waterRiskLevel,
-              rainRiskLevel: st.rainRiskLevel,
-              riskLevel: st.riskLevel,
-              lastUpdated: new Date(),
-            };
-          });
-          setFallbackStations(mapped);
-        }
-      }
-    } catch (err) {
-      console.error("[Telemetry Sync Error]", err);
+      await refreshScraper();
     } finally {
       setSyncing(false);
     }
   };
-
-  useEffect(() => {
-    triggerTelemetrySync();
-  }, []);
-
-  // Use Firestore telemetry stations when available; fall back to scraped data
-  const activeStations = useMemo(() => {
-    return firestoreStations.length > 0 ? firestoreStations : fallbackStations;
-  }, [firestoreStations, fallbackStations]);
 
   // Overall telemetry summary metrics
   const metrics = useMemo(() => {

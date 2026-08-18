@@ -90,7 +90,7 @@ export interface NearestStationResult {
 }
 
 /**
- * Telemetry synchronization metadata document in `sync_meta/telemetry`.
+ * Telemetry synchronization metadata and consolidated snapshot document in `sync_meta/telemetry`.
  */
 export interface TelemetrySyncMetaDoc {
   /** Server timestamp when sync was executed */
@@ -101,5 +101,7 @@ export interface TelemetrySyncMetaDoc {
   status: "SUCCESS" | "FAILED";
   /** ISO string of last update */
   updatedAtIso?: string;
+  /** Consolidated active stations array for O(1) single-document reads */
+  stations?: StationDoc[];
 }
 
