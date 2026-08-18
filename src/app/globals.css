@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0a;
+  --background: #020617;
   --foreground: #ededed;
 }
 
@@ -13,12 +13,34 @@
   --font-mono: "Fira Code", ui-monospace, monospace;
 }
 
-html {
-  color-scheme: dark;
-}
-
+html,
 body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  color-scheme: dark;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* Custom Scrollbar for floating panels and drawers */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.8);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 1);
+}
+
