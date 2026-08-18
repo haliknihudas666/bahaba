@@ -24,6 +24,8 @@ export interface UseLiveFloodStatusReturn {
   error: Error | null;
   /** Data source: "firestore" (real-time stream) or "scraper" (direct endpoint fallback) */
   source: TelemetrySource;
+  /** Latest observation or sync timestamp across telemetry stations */
+  lastUpdated: Date | null;
   /** Function to trigger a fresh direct scrape */
   refreshScraper: () => Promise<void>;
 }
@@ -67,6 +69,8 @@ function parseStationItem(st: any): LiveStation {
         : st.coordinates._long ?? 0;
   }
 
+  const stationTime = parseTimestamp(st.observedAt || st.lastUpdated) || new Date();
+
   return {
     stationId: st.stationId || "",
     stationName: st.stationName || "Unknown Station",
@@ -81,7 +85,7 @@ function parseStationItem(st: any): LiveStation {
     waterRiskLevel: st.waterRiskLevel || st.riskLevel || "UNKNOWN",
     rainRiskLevel: st.rainRiskLevel || "UNKNOWN",
     riskLevel: st.riskLevel || "UNKNOWN",
-    lastUpdated: parseTimestamp(st.lastUpdated),
+    lastUpdated: stationTime,
   };
 }
 
@@ -93,13 +97,14 @@ function parseStationItem(st: any): LiveStation {
  * Automatically falls back to the direct `/api/cron/ingest` scraper endpoint
  * if Firebase quota is exceeded (RESOURCE_EXHAUSTED), offline, or unavailable.
  *
- * @returns `{ stations, loading, error, source, refreshScraper }`
+ * @returns `{ stations, loading, error, source, lastUpdated, refreshScraper }`
  */
 export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
   const [stations, setStations] = useState<LiveStation[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
   const [source, setSource] = useState<TelemetrySource>("none");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const hasReceivedDataRef = useRef(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -118,6 +123,7 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
       if (data.stations && data.stations.length > 0) {
         const mapped: LiveStation[] = data.stations.map((st) => {
           const fallbackCoords = getStationCoords(st.stationName);
+          const stationTime = parseTimestamp(st.observedAt) || parseTimestamp(data.scrapedAt) || new Date();
           return {
             stationId: slugifyStationId(st.stationName),
             stationName: st.stationName,
@@ -132,13 +138,22 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
             waterRiskLevel: st.waterRiskLevel || st.riskLevel || "UNKNOWN",
             rainRiskLevel: st.rainRiskLevel || "UNKNOWN",
             riskLevel: st.riskLevel || "UNKNOWN",
-            lastUpdated: new Date(),
+            lastUpdated: stationTime,
           };
         });
 
         mapped.sort((a, b) => a.stationName.localeCompare(b.stationName));
         setStations(mapped);
         setSource("scraper");
+
+        // Find most recent observation time
+        const latestTime = mapped.reduce<Date | null>((max, s) => {
+          if (!s.lastUpdated) return max;
+          if (!max || s.lastUpdated.getTime() > max.getTime()) return s.lastUpdated;
+          return max;
+        }, null) || parseTimestamp(data.scrapedAt) || new Date();
+
+        setLastUpdated(latestTime);
         hasReceivedDataRef.current = true;
         setError(null);
       }
@@ -153,10 +168,12 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
   }, []);
 
   useEffect(() => {
-    // If clientDb is not available, immediately fall back to scraper with 5-minute polling
+    // Proactively fetch live scraper data immediately so UI never waits or hangs
+    fetchFromScraper();
+
+    // If clientDb is not available, set up 5-minute background polling
     if (!clientDb) {
       console.warn("[useLiveFloodStatus] Firestore Client SDK not available. Using direct scraper fallback.");
-      fetchFromScraper();
       pollIntervalRef.current = setInterval(() => {
         fetchFromScraper(true);
       }, 5 * 60 * 1000);
@@ -166,17 +183,6 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
       };
     }
 
-    setLoading(true);
-    setError(null);
-
-    // Safety timeout: if Firestore does not deliver data within 5s (e.g. quota blocked or hanging), fallback to scraper
-    const initialTimeout = setTimeout(() => {
-      if (!hasReceivedDataRef.current) {
-        console.warn("[useLiveFloodStatus] Firestore connection timeout. Falling back to direct scraper...");
-        fetchFromScraper();
-      }
-    }, 5000);
-
     let fallbackCollectionUnsub: (() => void) | null = null;
 
     // Primary O(1) subscription: Consolidated metadata & station array document
@@ -185,7 +191,6 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
     const unsubscribe = onSnapshot(
       syncMetaDocRef,
       (docSnap) => {
-        clearTimeout(initialTimeout);
         if (docSnap.exists()) {
           const data = docSnap.data();
           if (Array.isArray(data?.stations) && data.stations.length > 0) {
@@ -196,6 +201,14 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
 
             setStations(liveList);
             setSource("firestore");
+
+            const latestTime = liveList.reduce<Date | null>((max, s) => {
+              if (!s.lastUpdated) return max;
+              if (!max || s.lastUpdated.getTime() > max.getTime()) return s.lastUpdated;
+              return max;
+            }, null) || parseTimestamp(data.lastSyncedAt) || new Date();
+
+            setLastUpdated(latestTime);
             hasReceivedDataRef.current = true;
             setLoading(false);
             setError(null);
@@ -217,6 +230,14 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
               if (liveList.length > 0) {
                 setStations(liveList);
                 setSource("firestore");
+
+                const latestTime = liveList.reduce<Date | null>((max, s) => {
+                  if (!s.lastUpdated) return max;
+                  if (!max || s.lastUpdated.getTime() > max.getTime()) return s.lastUpdated;
+                  return max;
+                }, null) || new Date();
+
+                setLastUpdated(latestTime);
                 hasReceivedDataRef.current = true;
                 setLoading(false);
                 setError(null);
@@ -230,7 +251,6 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
         }
       },
       (err: Error) => {
-        clearTimeout(initialTimeout);
         console.warn("[useLiveFloodStatus] Firestore snapshot error (quota exceeded or blocked). Falling back to direct scraper...", err);
         fetchFromScraper();
 
@@ -244,7 +264,6 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
     );
 
     return () => {
-      clearTimeout(initialTimeout);
       unsubscribe();
       if (fallbackCollectionUnsub) {
         fallbackCollectionUnsub();
@@ -260,6 +279,7 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
     loading,
     error,
     source,
+    lastUpdated,
     refreshScraper: fetchFromScraper,
   };
 }

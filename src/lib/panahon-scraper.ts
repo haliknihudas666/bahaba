@@ -168,6 +168,8 @@ export async function fetchPanahonRainfallStations(): Promise<StationTelemetry[]
 
     const rainRiskLevel = classifyRainRisk(rainfall);
 
+    const observedAt = item.observed_at ? String(item.observed_at) : new Date().toISOString();
+
     stations.push({
       stationName,
       latitude: lat,
@@ -177,6 +179,7 @@ export async function fetchPanahonRainfallStations(): Promise<StationTelemetry[]
       waterRiskLevel: "UNKNOWN",
       rainRiskLevel,
       riskLevel: rainRiskLevel,
+      observedAt,
     });
   }
 
@@ -193,6 +196,8 @@ export function convertPanahonToLiveStations(telemetry: StationTelemetry[]): Liv
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
 
+    const lastUpdatedDate = st.observedAt ? new Date(st.observedAt) : new Date();
+
     return {
       stationId: `panahon-${slug}`,
       stationName: st.stationName,
@@ -207,7 +212,7 @@ export function convertPanahonToLiveStations(telemetry: StationTelemetry[]): Liv
       waterRiskLevel: st.waterRiskLevel,
       rainRiskLevel: st.rainRiskLevel,
       riskLevel: st.riskLevel,
-      lastUpdated: new Date(),
+      lastUpdated: isNaN(lastUpdatedDate.getTime()) ? new Date() : lastUpdatedDate,
     };
   });
 }

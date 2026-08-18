@@ -39,6 +39,7 @@ export default function HomePage() {
     stations: activeStations,
     loading: firestoreLoading,
     source: telemetrySource,
+    lastUpdated,
     refreshScraper,
   } = useLiveFloodStatus();
   const [syncing, setSyncing] = useState<boolean>(false);
@@ -122,6 +123,27 @@ export default function HomePage() {
 
     return { total, highRisk, peakWater, peakWaterStation, maxRain };
   }, [activeStations]);
+
+  // Formatted observation / sync timestamp
+  const lastUpdatedFormatted = useMemo(() => {
+    if (!lastUpdated || isNaN(lastUpdated.getTime())) return null;
+    return lastUpdated.toLocaleTimeString("en-PH", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }, [lastUpdated]);
+
+  const lastUpdatedFullDate = useMemo(() => {
+    if (!lastUpdated || isNaN(lastUpdated.getTime())) return null;
+    return lastUpdated.toLocaleString("en-PH", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }, [lastUpdated]);
 
   const activeRoute = routeOptions[selectedRouteIdx] || routeOptions[0];
 
@@ -366,19 +388,32 @@ export default function HomePage() {
                 </span>
               </h1>
               <p className="text-[11px] sm:text-xs text-slate-400 hidden sm:block">
-                Driving Directions & Predicted Flood Telemetry
+                Driving Directions &amp; Predicted Flood Telemetry
+                {lastUpdatedFormatted && (
+                  <span className="text-slate-400 font-mono ml-1.5">
+                    • As of {lastUpdatedFormatted}
+                  </span>
+                )}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Live Indicator (desktop only) */}
-            <div className="hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+            <div
+              title={lastUpdatedFullDate ? `Last Observation/Sync: ${lastUpdatedFullDate}` : "PAGASA Hydrological Telemetry"}
+              className="hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800"
+            >
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
               <span>PAGASA Telemetry</span>
+              {lastUpdatedFormatted && (
+                <span className="text-[11px] text-slate-400 font-mono pl-2 border-l border-slate-800">
+                  {lastUpdatedFormatted}
+                </span>
+              )}
             </div>
 
             {/* Share Report Button */}
@@ -429,7 +464,9 @@ export default function HomePage() {
               <span className="text-xl sm:text-2xl font-bold font-mono text-white">
                 {metrics.total}
               </span>
-              <span className="text-[10px] sm:text-xs text-slate-500 font-mono">Active</span>
+              <span className="text-[10px] sm:text-xs text-slate-500 font-mono">
+                {lastUpdatedFormatted ? `As of ${lastUpdatedFormatted}` : "Active"}
+              </span>
             </div>
           </div>
 

@@ -98,6 +98,8 @@ export interface StationTelemetry {
   rainRiskLevel: FloodRiskLevel["label"];
   /** Highest composite risk level between water level and rainfall */
   riskLevel: FloodRiskLevel["label"];
+  /** PAGASA observation timestamp string (ISO or formatted), null if fallback */
+  observedAt?: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -143,23 +143,45 @@ export function cleanStationName(raw: string | undefined): string {
     .replace(/\s+/g, " ")
     .replace(/\u00a0/g, " ");
 }
-
 /**
  * Build the `ymdhm` parameter PAGASA expects: "YYYYMMDDHHmm", rounded
- * down to the nearest 10 minutes (matching the sensor reporting interval).
+ * down to the nearest 10 minutes (matching the sensor reporting interval)
+ * in Philippine Standard Time (UTC+8).
  */
-function currentYmdhm(): string {
+export function currentYmdhm(): string {
   const now = new Date();
-  const min = Math.floor(now.getMinutes() / 10) * 10;
+  const phtOffset = 8 * 60; // PHT is UTC+8
+  const utcMinutes = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const phtDate = new Date(utcMinutes + (phtOffset * 60000));
+
+  const min = Math.floor(phtDate.getMinutes() / 10) * 10;
   const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 
   return (
-    `${now.getFullYear()}` +
-    `${pad(now.getMonth() + 1)}` +
-    `${pad(now.getDate())}` +
-    `${pad(now.getHours())}` +
+    `${phtDate.getFullYear()}` +
+    `${pad(phtDate.getMonth() + 1)}` +
+    `${pad(phtDate.getDate())}` +
+    `${pad(phtDate.getHours())}` +
     `${pad(min)}`
   );
+}
+
+/**
+ * Parse a PAGASA ymdhm string into an authoritative UTC ISO string.
+ */
+export function parseYmdhmToIso(ymdhm: string): string {
+  if (ymdhm && ymdhm.length === 12) {
+    const y = parseInt(ymdhm.substring(0, 4), 10);
+    const m = parseInt(ymdhm.substring(4, 6), 10) - 1;
+    const d = parseInt(ymdhm.substring(6, 8), 10);
+    const h = parseInt(ymdhm.substring(8, 10), 10);
+    const min = parseInt(ymdhm.substring(10, 12), 10);
+    // Interpreted in UTC+8
+    const utcMs = Date.UTC(y, m, d, h - 8, min);
+    const date = new Date(utcMs);
+    if (!isNaN(date.getTime())) return date.toISOString();
+  }
+  return new Date().toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +323,7 @@ export function mergeStationData(
   rainfall: RainfallReading[],
   waterLevels: WaterLevelReading[],
   coordMap: StationCoordMap = {},
+  observedAt?: string | null,
 ): StationTelemetry[] {
   const normalize = (name: string) => name.toLowerCase().trim();
 
@@ -335,6 +358,7 @@ export function mergeStationData(
       waterRiskLevel,
       rainRiskLevel,
       riskLevel,
+      observedAt: observedAt || new Date().toISOString(),
     });
   }
 
@@ -440,7 +464,8 @@ export async function ingestTelemetry(): Promise<ScrapeResult> {
     const coordMap = coordMapRes.status === "fulfilled" ? coordMapRes.value : ({} as StationCoordMap);
     const panahonStations = panahonStationsRes.status === "fulfilled" ? panahonStationsRes.value : [];
 
-    const ffwsStations = mergeStationData(rainfall, waterLevels, coordMap);
+    const observedAtIso = parseYmdhmToIso(currentYmdhm());
+    const ffwsStations = mergeStationData(rainfall, waterLevels, coordMap, observedAtIso);
 
     // Merge FFWS stations with Panahon AWS stations
     // Prevent duplicate stations if named similarly

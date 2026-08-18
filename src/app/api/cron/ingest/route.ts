@@ -2,7 +2,7 @@
 // Bahaba (Baha ba? / "Is It Flooded?") – Telemetry Cron Ingestion Endpoint
 //
 // Scrapes PAGASA Pasig-Marikina-Tullahan FFWS telemetry tables, normalises
-// values, and executes dual Firestore batch write pipelines.
+// values, and executes dual Firestore batch write pipelines with in-memory caching.
 // ---------------------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -15,6 +15,11 @@ import type { ScrapeResult, StationTelemetry } from "@/types";
 /** Minimum duration in milliseconds required between Firestore syncs (30 minutes) */
 const MIN_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 
+/** In-memory cache for fast responses without repeating external scrapes */
+let memoryCachedResult: ScrapeResult | null = null;
+let memoryCachedAt = 0;
+const MEMORY_CACHE_TTL_MS = 60_000; // 60 seconds
+
 interface FirestorePersistResult {
   persistedCount: number;
   skipped?: boolean;
@@ -22,6 +27,18 @@ interface FirestorePersistResult {
   lastSyncedAt?: string;
   elapsedMinutes?: number;
   error?: string;
+}
+
+/**
+ * Utility to run an async operation with a strict timeout to avoid blocking requests.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallbackMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`[Timeout] ${fallbackMsg} (${ms}ms)`)), ms)
+    ),
+  ]);
 }
 
 /**
@@ -76,8 +93,11 @@ async function getLastSyncTimestamp(): Promise<Date | null> {
       const stationTime = parseFirestoreTimestamp(data?.lastUpdated);
       if (stationTime) return stationTime;
     }
-  } catch (err) {
-    console.warn("[Firestore] Failed to check last sync timestamp:", err);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.warn("[Firestore] Last sync check unavailable (quota/network):", msg);
+    // Rethrow to let persistTelemetryToFirestore know Firestore is unavailable
+    throw err;
   }
 
   return null;
@@ -86,6 +106,7 @@ async function getLastSyncTimestamp(): Promise<Date | null> {
 /**
  * Execute Firestore write pipeline for scraped station telemetry.
  * Skips saving to Firestore if the last sync was less than 30 minutes ago (unless force is true).
+ * Fails fast if Firestore quota is exceeded or unavailable.
  */
 async function persistTelemetryToFirestore(
   stations: StationTelemetry[],
@@ -98,27 +119,38 @@ async function persistTelemetryToFirestore(
   try {
     // ── Check if last sync was within the last 30 minutes ─────────────────
     if (!force) {
-      const lastSyncDate = await getLastSyncTimestamp();
-      if (lastSyncDate) {
-        const now = Date.now();
-        const elapsedMs = now - lastSyncDate.getTime();
+      try {
+        const lastSyncDate = await withTimeout(getLastSyncTimestamp(), 2000, "Firestore read timeout");
+        if (lastSyncDate) {
+          const now = Date.now();
+          const elapsedMs = now - lastSyncDate.getTime();
 
-        // If last sync was less than 30 minutes ago, skip saving to Firebase
-        if (elapsedMs >= 0 && elapsedMs < MIN_SYNC_INTERVAL_MS) {
-          const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-          const remainingMinutes = Math.ceil((MIN_SYNC_INTERVAL_MS - elapsedMs) / 60_000);
-          const reason = `Last sync was ${elapsedMinutes}m ago (< 30m). Next sync allowed in ~${remainingMinutes}m.`;
+          // If last sync was less than 30 minutes ago, skip saving to Firebase
+          if (elapsedMs >= 0 && elapsedMs < MIN_SYNC_INTERVAL_MS) {
+            const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+            const remainingMinutes = Math.ceil((MIN_SYNC_INTERVAL_MS - elapsedMs) / 60_000);
+            const reason = `Last sync was ${elapsedMinutes}m ago (< 30m). Next sync allowed in ~${remainingMinutes}m.`;
 
-          console.log(`[Firestore Ingest] Skipping save to Firebase: ${reason}`);
-
-          return {
-            persistedCount: 0,
-            skipped: true,
-            reason,
-            lastSyncedAt: lastSyncDate.toISOString(),
-            elapsedMinutes,
-          };
+            return {
+              persistedCount: 0,
+              skipped: true,
+              reason,
+              lastSyncedAt: lastSyncDate.toISOString(),
+              elapsedMinutes,
+            };
+          }
         }
+      } catch (quotaErr: any) {
+        // If Firestore read failed (e.g. RESOURCE_EXHAUSTED / Quota exceeded / Timeout),
+        // fail-fast immediately and do NOT attempt a batch write that will hang.
+        const errMsg = quotaErr?.message || String(quotaErr);
+        console.warn("[Firestore Ingest] Firestore read skipped, serving live telemetry directly:", errMsg);
+        return {
+          persistedCount: 0,
+          skipped: true,
+          reason: "Firestore quota exceeded or read timed out; serving direct telemetry.",
+          error: errMsg,
+        };
       }
     }
 
@@ -130,7 +162,6 @@ async function persistTelemetryToFirestore(
 
     for (const st of stations) {
       const stationId = slugifyStationId(st.stationName);
-      // Prefer PAGASA's authoritative coords from map_list.do; fallback to hardcoded
       const fallbackCoords = getStationCoords(st.stationName);
       const lat = st.latitude ?? fallbackCoords.lat;
       const lng = st.longitude ?? fallbackCoords.lng;
@@ -156,7 +187,7 @@ async function persistTelemetryToFirestore(
         waterRiskLevel: st.waterRiskLevel,
         rainRiskLevel: st.rainRiskLevel,
         riskLevel: st.riskLevel,
-        lastUpdated: new Date().toISOString(),
+        lastUpdated: st.observedAt || new Date().toISOString(),
       });
 
       // Pipeline: Active Station Snapshot Document
@@ -196,7 +227,9 @@ async function persistTelemetryToFirestore(
       { merge: true },
     );
 
-    await batch.commit();
+    // Commit with a strict 2.5-second timeout so Firestore never hangs the HTTP response
+    await withTimeout(batch.commit(), 2500, "Firestore batch commit timeout");
+
     return {
       persistedCount: stations.length,
       skipped: false,
@@ -204,7 +237,7 @@ async function persistTelemetryToFirestore(
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Firestore write failed";
-    console.error("[Firestore Pipeline Error]", message);
+    console.warn("[Firestore Pipeline Error]", message);
     return { persistedCount: 0, error: message };
   }
 }
@@ -224,13 +257,37 @@ export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
     }
   }
 
+  // Fast-path: Return fresh in-memory cached scrape result if available (< 60s)
+  const now = Date.now();
+  if (!force && memoryCachedResult && memoryCachedResult.success && memoryCachedResult.stations.length > 0 && (now - memoryCachedAt < MEMORY_CACHE_TTL_MS)) {
+    return NextResponse.json(memoryCachedResult, {
+      status: 200,
+      headers: {
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+        "X-Cache": "HIT-MEMORY",
+        "X-Scrape-Duration-Ms": String(memoryCachedResult.meta.durationMs),
+      },
+    });
+  }
+
   // ── Run telemetry scraping ──────────────────────────────────────────────
   const result = await ingestTelemetry();
 
-  // ── Firestore Persistence Pipeline ──────────────────────────────────────
+  if (result.success && result.stations.length > 0) {
+    memoryCachedResult = result;
+    memoryCachedAt = Date.now();
+  }
+
+  // ── Firestore Persistence Pipeline (Fail-fast, non-blocking) ────────────
   let firestoreMeta: FirestorePersistResult = { persistedCount: 0 };
   if (result.success && result.stations.length > 0) {
-    firestoreMeta = await persistTelemetryToFirestore(result.stations, force);
+    try {
+      firestoreMeta = await persistTelemetryToFirestore(result.stations, force);
+    } catch (persistErr: unknown) {
+      const msg = persistErr instanceof Error ? persistErr.message : "Firestore write skipped";
+      console.warn("[Firestore Ingest] Skipping write:", msg);
+      firestoreMeta = { persistedCount: 0, error: msg };
+    }
   }
 
   // Return 502 when upstream scrape failed
@@ -239,7 +296,8 @@ export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
   return NextResponse.json(result, {
     status,
     headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate",
+      "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+      "X-Cache": "MISS",
       "X-Scrape-Duration-Ms": String(result.meta.durationMs),
       "X-Rainfall-Rows": String(result.meta.rainfallRowCount),
       "X-WaterLevel-Rows": String(result.meta.waterLevelRowCount),
@@ -257,4 +315,5 @@ export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
 // ---------------------------------------------------------------------------
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
 
