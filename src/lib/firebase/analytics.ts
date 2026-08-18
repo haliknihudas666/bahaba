@@ -174,7 +174,9 @@ export function trackTelemetrySync() {
 }
 
 /** Track Table view tab switch */
-export function trackTableTabSwitch(tabName: "station-telemetry" | "road-predictions") {
+export function trackTableTabSwitch(
+  tabName: "station-telemetry" | "road-predictions" | "nearest-finder" | string
+) {
   logAnalyticsEvent("switch_table_tab", {
     tab_name: tabName,
   });
