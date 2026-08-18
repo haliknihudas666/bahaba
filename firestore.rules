@@ -14,6 +14,12 @@ service cloud.firestore {
       allow write: if false; // Server Admin SDK bypasses rules
     }
 
+    // Telemetry Sync Metadata (read public, write admin/service account only)
+    match /sync_meta/{documentId} {
+      allow read: if true;
+      allow write: if false; // Server Admin SDK bypasses rules
+    }
+
     // Default deny for all other collections
     match /{document=**} {
       allow read, write: if false;

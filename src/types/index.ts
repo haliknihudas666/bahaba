@@ -13,6 +13,7 @@ export type {
   StationDoc,
   LiveStation,
   NearestStationResult,
+  TelemetrySyncMetaDoc,
 } from "./firestore";
 
 export type { MetroLocationItem } from "./location";
