@@ -9,7 +9,7 @@ import type { LiveStation } from "@/types";
 import RoadFloodLayer from "./RoadFloodLayer";
 import NOAHPredictedRoadsLayer from "./NOAHPredictedRoadsLayer";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
-import type { RouteSegmentData } from "@/lib/engine/routeSolver";
+import type { RouteSegmentData, TravelMode } from "@/lib/engine/routeSolver";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface RoadFloodMapProps {
@@ -31,6 +31,8 @@ interface RoadFloodMapProps {
   destinationCoords?: [number, number] | null;
   /** Custom road features overlay */
   customRoads?: GeoJSONLineStringFeature[];
+  /** Travel mode: driving or walking */
+  travelMode?: TravelMode;
 }
 
 export default function RoadFloodMap({
@@ -43,6 +45,7 @@ export default function RoadFloodMap({
   originCoords,
   destinationCoords,
   customRoads,
+  travelMode = "driving",
 }: RoadFloodMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
@@ -264,8 +267,9 @@ export default function RoadFloodMap({
         routeGroup.clearLayers();
 
         const bounds: [number, number][] = [];
+        const isWalking = travelMode === "walking";
 
-        // A. Render Base Driving Route Casing & Polyline
+        // A. Render Base Route Casing & Polyline
         if (fullRoutePolyline && fullRoutePolyline.length >= 2) {
           const validFullCoords = fullRoutePolyline.filter(
             (c) =>
@@ -284,29 +288,53 @@ export default function RoadFloodMap({
           if (validFullCoords.length >= 2) {
             validFullCoords.forEach((c) => bounds.push(c));
 
-            // Outer Casing (Border)
-            L.polyline(validFullCoords, {
-              color: "#0f172a",
-              weight: 9,
-              opacity: 0.9,
-              lineCap: "round",
-              lineJoin: "round",
-              noClip: true,
-            }).addTo(routeGroup);
+            if (isWalking) {
+              // Walking Mode: Dashed outer casing
+              L.polyline(validFullCoords, {
+                color: "#022c22",
+                weight: 8,
+                opacity: 0.9,
+                dashArray: "10, 8",
+                lineCap: "round",
+                lineJoin: "round",
+                noClip: true,
+              }).addTo(routeGroup);
 
-            // Base Driving Blue Polyline (Google Maps Style)
-            L.polyline(validFullCoords, {
-              color: "#2563eb", // Google Maps Driving Blue
-              weight: 6,
-              opacity: 0.9,
-              lineCap: "round",
-              lineJoin: "round",
-              noClip: true,
-            }).addTo(routeGroup);
+              // Walking Mode: Teal/Cyan dotted path
+              L.polyline(validFullCoords, {
+                color: "#06b6d4",
+                weight: 5,
+                opacity: 0.95,
+                dashArray: "6, 6",
+                lineCap: "round",
+                lineJoin: "round",
+                noClip: true,
+              }).addTo(routeGroup);
+            } else {
+              // Driving Mode: Outer Casing (Border)
+              L.polyline(validFullCoords, {
+                color: "#0f172a",
+                weight: 9,
+                opacity: 0.9,
+                lineCap: "round",
+                lineJoin: "round",
+                noClip: true,
+              }).addTo(routeGroup);
+
+              // Driving Mode: Base Driving Blue Polyline (Google Maps Style)
+              L.polyline(validFullCoords, {
+                color: "#2563eb",
+                weight: 6,
+                opacity: 0.9,
+                lineCap: "round",
+                lineJoin: "round",
+                noClip: true,
+              }).addTo(routeGroup);
+            }
           }
         }
 
-        // B. Highlight Flooded Sub-Segments directly ON TOP of the driving polyline
+        // B. Highlight Flooded Sub-Segments directly ON TOP of the polyline
         if (routeSegments && routeSegments.length > 0) {
           routeSegments.forEach((segment) => {
             if (!segment.coordinates || segment.coordinates.length < 2) return;
@@ -330,28 +358,66 @@ export default function RoadFloodMap({
 
             // Only draw highlighted overlay if there is a flood alert/warning (>5 cm)
             if (segment.depthCm > 5) {
-              const isCritical = segment.severity === "CRITICAL";
-              const isAlarm = segment.severity === "ALARM";
+              const isCritical = segment.severity === "CRITICAL" || segment.depthCm > 25;
+              const isAlarm = segment.severity === "ALARM" || segment.depthCm >= 16;
 
               // Flooded Highlight Overlay Polyline
               const highlightPolyline = L.polyline(validCoords, {
                 color: segment.color,
                 weight: isCritical ? 9 : isAlarm ? 8 : 7,
                 opacity: 0.95,
-                dashArray: isCritical ? "8, 10" : undefined,
+                dashArray: isCritical ? "8, 10" : isWalking ? "6, 6" : undefined,
                 lineCap: "round",
                 lineJoin: "round",
                 noClip: true,
               });
 
-              const passableTags = (segment.passableVehicles || [])
-                .map((v) => `<span style="background-color: #f1f5f9; color: #1e293b; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 10px;">🚗 ${v}</span>`)
-                .join(" ");
+              let passabilityOrWalkHtml = "";
+              if (isWalking) {
+                const walkStatusText =
+                  segment.depthCm > 25
+                    ? "⛔ DO NOT WALK (Waist Deep / Open Drain Risk)"
+                    : segment.depthCm >= 16
+                    ? "⚠️ Hazardous Wading (Knee Deep - Boots & Stick Req.)"
+                    : "👢 Walkable with High Boots";
+
+                const walkStatusColor =
+                  segment.depthCm > 25 ? "#ef4444" : segment.depthCm >= 16 ? "#f97316" : "#eab308";
+
+                passabilityOrWalkHtml = `
+                  <div style="margin-top: 6px; padding: 6px; border-radius: 6px; background-color: #0f172a; border: 1px solid #334155;">
+                    <span style="font-size: 10px; font-weight: 700; color: ${walkStatusColor}; display: block;">
+                      🚶 ${walkStatusText}
+                    </span>
+                    ${segment.depthCm >= 10 ? `
+                    <span style="font-size: 9px; color: #cbd5e1; display: block; margin-top: 2px;">
+                      🦠 Leptospirosis Risk: Do not wade with wounds.
+                    </span>` : ""}
+                  </div>
+                `;
+              } else {
+                const passableTags = (segment.passableVehicles || [])
+                  .map((v) => `<span style="background-color: #f1f5f9; color: #1e293b; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 10px;">🚗 ${v}</span>`)
+                  .join(" ");
+
+                if (passableTags) {
+                  passabilityOrWalkHtml = `
+                    <div style="font-size: 10px; margin-top: 6px;">
+                      <span style="color: #64748b; font-weight: 600; display: block; margin-bottom: 3px;">Passable Vehicles:</span>
+                      <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${passableTags}
+                      </div>
+                    </div>
+                  `;
+                }
+              }
 
               const popupHtml = `
               <div style="font-family: system-ui, -apple-system, sans-serif; padding: 8px; color: #0f172a; min-width: 220px; max-width: 280px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
-                  <strong style="font-size: 13px; color: #0f172a;">⚠️ Route Flood Inundation</strong>
+                  <strong style="font-size: 13px; color: #0f172a;">
+                    ${isWalking ? "🚶 Pedestrian Flood Inundation" : "⚠️ Route Flood Inundation"}
+                  </strong>
                   <span style="font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 9999px; background-color: ${segment.color}; color: #ffffff;">
                     ${segment.severity}
                   </span>
@@ -382,13 +448,7 @@ export default function RoadFloodMap({
                   </div>
                 </div>
 
-                ${passableTags ? `
-                <div style="font-size: 10px;">
-                  <span style="color: #64748b; font-weight: 600; display: block; margin-bottom: 3px;">Passable Vehicles:</span>
-                  <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                    ${passableTags}
-                  </div>
-                </div>` : ""}
+                ${passabilityOrWalkHtml}
               </div>
             `;
 
@@ -401,13 +461,14 @@ export default function RoadFloodMap({
         // C. Render Point A (Origin) Pin
         if (originCoords && !isNaN(originCoords[0]) && !isNaN(originCoords[1])) {
           bounds.push(originCoords);
+          const pinColor = isWalking ? "#06b6d4" : "#2563eb";
           const originIcon = L.divIcon({
             className: "custom-pin-a",
             html: `
-            <div style="position: relative; display: flex; items-center; justify-content: center;">
-              <div style="position: absolute; width: 36px; height: 36px; border-radius: 50%; background-color: #3b82f6; opacity: 0.3; animation: ping 2s infinite;"></div>
-              <div style="background-color: #2563eb; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; border: 3px solid white; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.6);">
-                A
+            <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+              <div style="position: absolute; width: 36px; height: 36px; border-radius: 50%; background-color: ${pinColor}; opacity: 0.3; animation: ping 2s infinite;"></div>
+              <div style="background-color: ${pinColor}; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; border: 3px solid white; box-shadow: 0 4px 12px rgba(6, 182, 212, 0.6);">
+                ${isWalking ? "🚶" : "A"}
               </div>
             </div>
           `,
@@ -416,7 +477,7 @@ export default function RoadFloodMap({
           });
           L.marker(originCoords, { icon: originIcon })
             .addTo(routeGroup)
-            .bindPopup("<strong>📍 Point A (Origin)</strong>");
+            .bindPopup(`<strong>📍 Point A (${isWalking ? "Start Walking" : "Origin"})</strong>`);
         }
 
         // D. Render Point B (Destination) Pin
@@ -425,10 +486,10 @@ export default function RoadFloodMap({
           const destIcon = L.divIcon({
             className: "custom-pin-b",
             html: `
-            <div style="position: relative; display: flex; items-center; justify-content: center;">
+            <div style="position: relative; display: flex; align-items: center; justify-content: center;">
               <div style="position: absolute; width: 36px; height: 36px; border-radius: 50%; background-color: #ef4444; opacity: 0.3; animation: ping 2s infinite;"></div>
               <div style="background-color: #dc2626; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; border: 3px solid white; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.6);">
-                B
+                ${isWalking ? "🎯" : "B"}
               </div>
             </div>
           `,
@@ -437,11 +498,11 @@ export default function RoadFloodMap({
           });
           L.marker(destinationCoords, { icon: destIcon })
             .addTo(routeGroup)
-            .bindPopup("<strong>🎯 Point B (Destination)</strong>");
+            .bindPopup(`<strong>🎯 Point B (${isWalking ? "Walking Destination" : "Destination"})</strong>`);
         }
 
         // E. Auto Fit Bounds ONLY when route or coordinates change (initial focus)
-        const routeKey = `${originCoords?.join(",")}-${destinationCoords?.join(",")}-${fullRoutePolyline?.length}`;
+        const routeKey = `${travelMode}-${originCoords?.join(",")}-${destinationCoords?.join(",")}-${fullRoutePolyline?.length}`;
 
         if (bounds.length > 0 && lastFittedKeyRef.current !== routeKey) {
           const validBounds = bounds.filter(
@@ -473,9 +534,10 @@ export default function RoadFloodMap({
     };
 
     map.whenReady(renderRoute);
-  }, [fullRoutePolyline, routeSegments, originCoords, destinationCoords, mapLoaded]);
+  }, [fullRoutePolyline, routeSegments, originCoords, destinationCoords, travelMode, mapLoaded]);
 
   const [isLegendOpen, setIsLegendOpen] = useState(false);
+  const isWalking = travelMode === "walking";
 
   return (
     <div id="bahaba-interactive-map" className="relative w-full h-full min-h-[380px] sm:min-h-[460px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
@@ -502,7 +564,7 @@ export default function RoadFloodMap({
           onClick={() => setIsLegendOpen(!isLegendOpen)}
           className="sm:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-[11px] font-bold text-slate-200 shadow-xl active:scale-95 transition-all"
         >
-          <span>🎨 Flood Legend</span>
+          <span>🎨 {isWalking ? "Walk Flood Legend" : "Drive Flood Legend"}</span>
           <span className="text-[10px] text-cyan-400">{isLegendOpen ? "▲ Hide" : "▼ Show"}</span>
         </button>
 
@@ -510,10 +572,10 @@ export default function RoadFloodMap({
         <div
           className={`${
             isLegendOpen ? "flex" : "hidden sm:flex"
-          } flex-col mt-2 sm:mt-0 bg-slate-900/95 backdrop-blur-md border border-slate-800 p-2.5 sm:p-3 rounded-xl shadow-xl text-xs space-y-1.5 min-w-[200px] sm:min-w-[210px]`}
+          } flex-col mt-2 sm:mt-0 bg-slate-900/95 backdrop-blur-md border border-slate-800 p-2.5 sm:p-3 rounded-xl shadow-xl text-xs space-y-1.5 min-w-[200px] sm:min-w-[220px]`}
         >
           <div className="flex items-center justify-between font-semibold text-slate-300 uppercase tracking-wider text-[10px] mb-0.5">
-            <span>Route Flood Legend</span>
+            <span>{isWalking ? "🚶 Walkability Legend" : "🚗 Route Flood Legend"}</span>
             <button
               onClick={() => setIsLegendOpen(false)}
               className="sm:hidden text-slate-400 hover:text-white p-0.5"
@@ -521,22 +583,46 @@ export default function RoadFloodMap({
               ✕
             </button>
           </div>
-          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
-            <span className="w-3.5 h-1.5 rounded-full bg-[#2563eb] shadow-sm flex-shrink-0"></span>
-            <span className="text-slate-300">Clear Route (0–5 cm)</span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
-            <span className="w-3.5 h-1.5 rounded-full bg-[#f97316] shadow-sm flex-shrink-0"></span>
-            <span className="text-slate-300">Gutter Deep (6–15 cm)</span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
-            <span className="w-3.5 h-1.5 rounded-full bg-[#ef4444] shadow-sm flex-shrink-0"></span>
-            <span className="text-slate-300">Half-Tire Deep (16–30 cm)</span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] sm:text-xs">
-            <span className="w-3.5 h-1.5 rounded-full bg-[#7f1d1d] shadow-sm flex-shrink-0"></span>
-            <span className="text-slate-300">Waist Deep+ (&gt;30 cm)</span>
-          </div>
+
+          {isWalking ? (
+            <>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#06b6d4] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Clear Walk (0–5 cm)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#eab308] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Boots Advised (6–15 cm)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#f97316] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Hazardous Wading (16–25 cm)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#ef4444] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">DO NOT WALK (&gt;25 cm)</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#2563eb] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Clear Route (0–5 cm)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#f97316] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Gutter Deep (6–15 cm)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#ef4444] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Half-Tire Deep (16–30 cm)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs">
+                <span className="w-3.5 h-1.5 rounded-full bg-[#7f1d1d] shadow-sm flex-shrink-0"></span>
+                <span className="text-slate-300">Waist Deep+ (&gt;30 cm)</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -563,3 +649,4 @@ export default function RoadFloodMap({
     </div>
   );
 }
+

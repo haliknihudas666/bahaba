@@ -15,6 +15,9 @@ import ShareModal from "@/components/ShareModal";
 import {
   fetchAndEvaluateRoute,
   type RouteOption,
+  type TravelMode,
+  type VehicleType,
+  VEHICLE_CONFIGS,
 } from "@/lib/engine/routeSolver";
 import { type RoadRiskResult, type RoadSeverity, calculateHaversineDistance } from "@/lib/engine/roadRisk";
 import { calculateWaterDepth, classifyFloodRisk } from "@/lib/engine/floodPredictor";
@@ -38,6 +41,10 @@ export default function HomePage() {
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+
+  // Travel Mode (Driving vs Walking) & Vehicle Type State
+  const [travelMode, setTravelMode] = useState<TravelMode>("driving");
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>("all");
 
   // Table selector state below map: "station-telemetry" or "road-predictions"
   const [activeTableTab, setActiveTableTab] = useState<"station-telemetry" | "road-predictions">("station-telemetry");
@@ -67,7 +74,7 @@ export default function HomePage() {
     coords: null,
   });
 
-  // OSRM Driving Routes State
+  // OSRM Driving/Walking Routes State
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
   const [selectedRouteIdx, setSelectedRouteIdx] = useState<number>(0);
   const [loadingRoute, setLoadingRoute] = useState<boolean>(false);
@@ -284,7 +291,7 @@ export default function HomePage() {
     });
   }, [roadEvaluations, tableFilterSeverity, tableSearchQuery]);
 
-  // Fetch OSRM driving route whenever Point A or Point B or telemetry changes
+  // Fetch OSRM driving or walking route whenever Point A or Point B or telemetry or mode changes
   useEffect(() => {
     let isMounted = true;
 
@@ -296,7 +303,10 @@ export default function HomePage() {
 
     setLoadingRoute(true);
 
-    fetchAndEvaluateRoute(originLoc.coords, destLoc.coords, activeStations)
+    fetchAndEvaluateRoute(originLoc.coords, destLoc.coords, activeStations, {
+      mode: travelMode,
+      vehicleType: selectedVehicle,
+    })
       .then((routes) => {
         if (isMounted) {
           setRouteOptions(routes);
@@ -312,6 +322,10 @@ export default function HomePage() {
               durationMin: fastest.durationMin,
               maxFloodDepthCm: fastest.maxFloodDepthCm,
               overallStatus: fastest.overallStatus,
+              mode: travelMode,
+              vehicleType: selectedVehicle,
+              trafficLevel: fastest.traffic?.level,
+              walkabilityCategory: fastest.walkability?.category,
             });
           }
         }
@@ -324,7 +338,7 @@ export default function HomePage() {
     return () => {
       isMounted = false;
     };
-  }, [originLoc.coords, destLoc.coords, activeStations]);
+  }, [originLoc.coords, destLoc.coords, activeStations, travelMode, selectedVehicle]);
 
   // Swap Origin and Destination
   const handleSwap = () => {
@@ -495,11 +509,76 @@ export default function HomePage() {
         {/* ── TOP SECTION: Directions Inputs & Interactive Map ───────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-stretch">
           {/* ── LEFT PANEL: Point A & Point B Directions & Route Options ────── */}
-          <div className="lg:col-span-5 flex flex-col space-y-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-md">
+          <div className="lg:col-span-5 flex flex-col space-y-3.5 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-md">
+            {/* Travel Mode Toggle: Drive (Vehicle) vs Walk (Pedestrian) */}
+            <div className="flex items-center p-1 bg-slate-950/90 border border-slate-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setTravelMode("driving")}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                  travelMode === "driving"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-900/40"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>🚗</span>
+                <span>Drive (Vehicle)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTravelMode("walking")}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                  travelMode === "walking"
+                    ? "bg-cyan-600 text-white shadow-md shadow-cyan-900/40"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>🚶</span>
+                <span>Walk (Pedestrian)</span>
+              </button>
+            </div>
+
+            {/* Vehicle Type Selector (Only in Drive mode) */}
+            {travelMode === "driving" && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold px-0.5">
+                  <span>Vehicle Clearance:</span>
+                  <span className="text-[10px] text-cyan-400 font-mono">
+                    Limit: {VEHICLE_CONFIGS[selectedVehicle].clearanceCm} cm
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-1 text-[11px]">
+                  {(["all", "sedan", "suv", "motorcycle", "truck"] as VehicleType[]).map((vType) => {
+                    const cfg = VEHICLE_CONFIGS[vType];
+                    const isSelected = selectedVehicle === vType;
+                    return (
+                      <button
+                        key={vType}
+                        type="button"
+                        onClick={() => setSelectedVehicle(vType)}
+                        className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl border text-center transition-all ${
+                          isSelected
+                            ? "bg-blue-600/30 border-blue-500 text-white font-bold shadow-sm ring-1 ring-blue-500/50"
+                            : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                        }`}
+                        title={cfg.description}
+                      >
+                        <span className="text-sm">{cfg.icon}</span>
+                        <span className="text-[10px] truncate max-w-full font-medium">
+                          {vType === "all" ? "All" : vType === "motorcycle" ? "Motor" : vType.toUpperCase()}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Location Autocomplete Search Group */}
             <div className="space-y-3 relative p-3 bg-slate-950/80 border border-slate-800 rounded-xl">
               <LocationAutocomplete
-                label="Point A (Origin)"
+                label={`Point A (${travelMode === "walking" ? "Start Walking" : "Origin"})`}
                 pointType="origin"
                 value={originLoc.name}
                 placeholder="Search origin, e.g. SM San Lazaro..."
@@ -527,7 +606,7 @@ export default function HomePage() {
               </div>
 
               <LocationAutocomplete
-                label="Point B (Destination)"
+                label={`Point B (${travelMode === "walking" ? "Walking Destination" : "Destination"})`}
                 pointType="destination"
                 value={destLoc.name}
                 placeholder="Search destination, e.g. SM Caloocan..."
@@ -542,10 +621,118 @@ export default function HomePage() {
               />
             </div>
 
-            {/* Suggested Driving Routes List */}
-            <div className="flex-1 space-y-3 overflow-y-auto max-h-[340px] sm:max-h-[360px] custom-scrollbar pr-1">
+            {/* Active Route Telemetry Breakdown (Traffic/Clearance for Drive, Walkability/Safety for Walk) */}
+            {activeRoute && (
+              <div className="space-y-2">
+                {travelMode === "driving" ? (
+                  <>
+                    {/* Live Traffic Card */}
+                    {activeRoute.traffic && (
+                      <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800/80 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm">🚦</span>
+                            <span className="text-xs font-bold text-slate-200">Traffic Telemetry</span>
+                          </div>
+                          <span
+                            className="text-[10px] font-extrabold px-2 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: `${activeRoute.traffic.color}20`,
+                              color: activeRoute.traffic.color,
+                              border: `1px solid ${activeRoute.traffic.color}50`,
+                            }}
+                          >
+                            {activeRoute.traffic.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-0.5 border-t border-slate-800/60">
+                          <span>Speed: <strong className="text-slate-200">{activeRoute.traffic.averageSpeedKmH} km/h</strong></span>
+                          <span>Delay: <strong className={activeRoute.traffic.delayMin > 0 ? "text-amber-400" : "text-emerald-400"}>+{activeRoute.traffic.delayMin} min</strong></span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Vehicle Passability Check Card */}
+                    {activeRoute.vehiclePassability && (
+                      <div
+                        className={`p-2.5 rounded-xl border text-xs space-y-1 ${
+                          activeRoute.vehiclePassability.statusLevel === "SAFE"
+                            ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
+                            : activeRoute.vehiclePassability.statusLevel === "CAUTION"
+                            ? "bg-amber-950/40 border-amber-800/60 text-amber-300"
+                            : "bg-rose-950/40 border-rose-800/60 text-rose-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between font-bold text-[11px]">
+                          <span>{VEHICLE_CONFIGS[selectedVehicle].icon} {VEHICLE_CONFIGS[selectedVehicle].name} Clearance</span>
+                          <span className="font-mono text-[10px]">
+                            {activeRoute.maxFloodDepthCm}cm / {activeRoute.vehiclePassability.clearanceCm}cm limit
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-snug">{activeRoute.vehiclePassability.statusText}</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Walking Mode Walkability & Safety Card */
+                  activeRoute.walkability && (
+                    <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">🚶</span>
+                          <div>
+                            <span className="text-xs font-bold text-slate-200 block">Pedestrian Walkability</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              Pace: {activeRoute.baseDurationMin}m base + {activeRoute.walkability.wadingDelayMin}m wading
+                            </span>
+                          </div>
+                        </div>
+                        <span
+                          className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full inline-block"
+                          style={{
+                            backgroundColor: `${activeRoute.walkability.color}20`,
+                            color: activeRoute.walkability.color,
+                            border: `1px solid ${activeRoute.walkability.color}50`,
+                          }}
+                        >
+                          {activeRoute.walkability.score}/100 • {activeRoute.walkability.label}
+                        </span>
+                      </div>
+
+                      {/* Safety Tips & Health Alerts */}
+                      {activeRoute.walkability.safetyTips.length > 0 && (
+                        <div className="p-2 rounded-lg bg-amber-950/30 border border-amber-800/40 text-[11px] space-y-1 text-amber-200">
+                          {activeRoute.walkability.safetyTips.map((tip, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className="mt-0.5">•</span>
+                              <span>{tip}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Recommended Gear */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5 text-[10px]">
+                        <span className="text-slate-400 font-semibold">Recommended Gear:</span>
+                        {activeRoute.walkability.recommendedGear.map((gear, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 rounded-md bg-slate-900 text-cyan-300 border border-slate-700/80 font-medium"
+                          >
+                            {gear}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
+            {/* Suggested Routes List */}
+            <div className="flex-1 space-y-3 overflow-y-auto max-h-[300px] sm:max-h-[320px] custom-scrollbar pr-1">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                <span>Suggested Driving Routes</span>
+                <span>Suggested {travelMode === "walking" ? "Walking" : "Driving"} Routes</span>
                 {loadingRoute && <span className="text-cyan-400 animate-pulse text-[11px]">Calculating...</span>}
               </div>
 
@@ -555,7 +742,9 @@ export default function HomePage() {
                     key={option.id}
                     onClick={() => setSelectedRouteIdx(idx)}
                     className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer ${selectedRouteIdx === idx
-                      ? "bg-slate-800/90 border-blue-500 ring-2 ring-blue-500/40 shadow-lg"
+                      ? travelMode === "walking"
+                        ? "bg-slate-800/90 border-cyan-500 ring-2 ring-cyan-500/40 shadow-lg"
+                        : "bg-slate-800/90 border-blue-500 ring-2 ring-blue-500/40 shadow-lg"
                       : "bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                   >
@@ -565,37 +754,65 @@ export default function HomePage() {
                           <span>{option.summary}</span>
                           {idx === 0 && (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                              Fastest
+                              {travelMode === "walking" ? "Shortest Walk" : "Fastest"}
                             </span>
                           )}
                         </h4>
                         <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-                          {option.distanceKm} km • {option.durationMin} mins driving
+                          {option.distanceKm} km • {option.durationMin} mins {travelMode === "walking" ? "walk" : "driving"}
                         </p>
                       </div>
 
                       <div className="text-right flex-shrink-0">
-                        <span className="text-base sm:text-lg font-black text-blue-400 font-mono">
+                        <span className={`text-base sm:text-lg font-black font-mono ${travelMode === "walking" ? "text-cyan-400" : "text-blue-400"}`}>
                           {option.durationMin} <span className="text-[10px] sm:text-xs font-sans text-slate-400">min</span>
                         </span>
                       </div>
                     </div>
 
-                    {/* Flood Hazard Alert Badge */}
-                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-400 text-[11px]">Max Flood:</span>
-                      <span
-                        className={`font-extrabold px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] ${option.maxFloodDepthCm > 30
-                          ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse"
-                          : option.maxFloodDepthCm >= 16
-                            ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
-                            : option.maxFloodDepthCm >= 6
-                              ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-                              : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
-                          }`}
-                      >
-                        {option.maxFloodDepthCm} cm ({option.overallStatus})
-                      </span>
+                    {/* Flood Hazard & Mode Telemetry Alert Badges */}
+                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-400 text-[11px]">Max Flood:</span>
+                        <span
+                          className={`font-extrabold px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] ${option.maxFloodDepthCm > 30
+                            ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse"
+                            : option.maxFloodDepthCm >= 16
+                              ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
+                              : option.maxFloodDepthCm >= 6
+                                ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                                : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                            }`}
+                        >
+                          {option.maxFloodDepthCm} cm ({option.overallStatus})
+                        </span>
+                      </div>
+
+                      {travelMode === "driving" && option.traffic && (
+                        <span
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                          style={{
+                            backgroundColor: `${option.traffic.color}15`,
+                            color: option.traffic.color,
+                            border: `1px solid ${option.traffic.color}40`,
+                          }}
+                        >
+                          🚦 {option.traffic.label}
+                        </span>
+                      )}
+
+                      {travelMode === "walking" && option.walkability && (
+                        <span
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                          style={{
+                            backgroundColor: `${option.walkability.color}15`,
+                            color: option.walkability.color,
+                            border: `1px solid ${option.walkability.color}40`,
+                          }}
+                        >
+                          🥾 {option.walkability.score}/100
+                        </span>
+                      )}
                     </div>
 
                     {/* Specific Warning Details */}
@@ -612,12 +829,12 @@ export default function HomePage() {
                 ))
               ) : (
                 <div className="p-5 sm:p-6 bg-slate-950/60 border border-slate-800 rounded-xl text-center space-y-2">
-                  <div className="text-2xl">🗺️</div>
+                  <div className="text-2xl">{travelMode === "walking" ? "🚶" : "🗺️"}</div>
                   <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                     Select Point A & Point B
                   </h4>
                   <p className="text-xs text-slate-500">
-                    Search and pick origin and destination locations above to calculate flood-safe driving directions.
+                    Search and pick origin and destination locations above to calculate flood-safe {travelMode === "walking" ? "walking" : "driving"} directions.
                   </p>
                 </div>
               )}
@@ -635,6 +852,7 @@ export default function HomePage() {
                 destinationCoords={destLoc.coords}
                 fullRoutePolyline={activeRoute?.geometry}
                 routeSegments={activeRoute?.segmentedRoute}
+                travelMode={travelMode}
                 onSelectRoad={(risk) => setSelectedRoadRisk(risk)}
               />
             </div>
@@ -643,13 +861,13 @@ export default function HomePage() {
             {activeRoute && (
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 text-xs shadow-lg">
                 <div className="flex items-center gap-2.5 sm:gap-3">
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/40 flex items-center justify-center font-bold text-base sm:text-lg flex-shrink-0">
-                    🛣️
+                  <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl ${travelMode === "walking" ? "bg-cyan-600/20 text-cyan-400 border border-cyan-500/40" : "bg-blue-600/20 text-blue-400 border border-blue-500/40"} flex items-center justify-center font-bold text-base sm:text-lg flex-shrink-0`}>
+                    {travelMode === "walking" ? "🚶" : "🛣️"}
                   </div>
                   <div className="min-w-0 flex-1">
                     <strong className="text-white text-xs sm:text-sm block font-bold truncate">{activeRoute.summary}</strong>
                     <span className="text-slate-400 text-[11px] sm:text-xs block truncate">
-                      {activeRoute.distanceKm} km • {activeRoute.durationMin} mins • Flooded: {activeRoute.totalFloodedKm} km
+                      {activeRoute.distanceKm} km • {activeRoute.durationMin} mins {travelMode === "walking" ? "walk" : "drive"} • Flooded: {activeRoute.totalFloodedKm} km
                     </span>
                   </div>
                 </div>
@@ -665,10 +883,16 @@ export default function HomePage() {
                           : "bg-rose-500/20 text-rose-400 border-rose-500/40"
                       }`}
                   >
-                    {activeRoute.overallStatus === "SAFE" && "✅ SAFE"}
-                    {activeRoute.overallStatus === "CAUTION" && "⚠️ GUTTER DEEP"}
-                    {activeRoute.overallStatus === "HIGH_RISK" && "🚨 HALF-TIRE"}
-                    {activeRoute.overallStatus === "IMPASSABLE" && "⛔ IMPASSABLE"}
+                    {travelMode === "walking" ? (
+                      activeRoute.walkability?.label || (activeRoute.overallStatus === "SAFE" ? "✅ WALKABLE" : "⚠️ WADING")
+                    ) : (
+                      <>
+                        {activeRoute.overallStatus === "SAFE" && "✅ SAFE"}
+                        {activeRoute.overallStatus === "CAUTION" && "⚠️ GUTTER DEEP"}
+                        {activeRoute.overallStatus === "HIGH_RISK" && "🚨 HALF-TIRE"}
+                        {activeRoute.overallStatus === "IMPASSABLE" && "⛔ IMPASSABLE"}
+                      </>
+                    )}
                   </span>
 
                   <button

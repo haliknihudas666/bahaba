@@ -102,6 +102,10 @@ export function trackRouteCalculation(params: {
   durationMin: number;
   maxFloodDepthCm: number;
   overallStatus: string;
+  mode?: string;
+  vehicleType?: string;
+  trafficLevel?: string;
+  walkabilityCategory?: string;
 }) {
   logAnalyticsEvent("calculate_flood_route", {
     origin: params.origin,
@@ -110,6 +114,10 @@ export function trackRouteCalculation(params: {
     duration_min: params.durationMin,
     max_flood_depth_cm: params.maxFloodDepthCm,
     overall_status: params.overallStatus,
+    travel_mode: params.mode ?? "driving",
+    vehicle_type: params.vehicleType ?? "all",
+    traffic_level: params.trafficLevel ?? "SMOOTH",
+    walkability_category: params.walkabilityCategory ?? "WALKABLE_CLEAR",
   });
 }
 

@@ -9,7 +9,8 @@
     "lint": "next lint",
     "test:engine": "tsx src/lib/engine/__tests__/flood-engine.test.ts",
     "test:road-risk": "tsx src/lib/engine/__tests__/road-risk.test.ts",
-    "test:noah": "tsx src/lib/engine/__tests__/noah-predictor.test.ts"
+    "test:noah": "tsx src/lib/engine/__tests__/noah-predictor.test.ts",
+    "test:route-solver": "tsx src/lib/engine/__tests__/route-solver.test.ts"
   },
   "dependencies": {
     "axios": "^1.7.9",

@@ -132,20 +132,22 @@ export default function ShareModal({
 
     captureMap();
   }, [isOpen]);
-
   if (!isOpen) return null;
 
   // Determine Flood Status details
   const isRouteActive = Boolean(origin?.name && destination?.name && activeRoute);
+  const isWalking = activeRoute?.mode === "walking";
 
   const statusLabel = isRouteActive
-    ? activeRoute?.overallStatus === "SAFE"
-      ? "SAFE / PASSABLE"
-      : activeRoute?.overallStatus === "CAUTION"
-        ? "GUTTER DEEP WARNING"
-        : activeRoute?.overallStatus === "HIGH_RISK"
-          ? "HALF-TIRE ALARM"
-          : "IMPASSABLE FLOOD"
+    ? isWalking
+      ? activeRoute?.walkability?.label || (activeRoute?.overallStatus === "SAFE" ? "WALKABLE / CLEAR" : "WADING HAZARD")
+      : activeRoute?.overallStatus === "SAFE"
+        ? "SAFE / PASSABLE"
+        : activeRoute?.overallStatus === "CAUTION"
+          ? "GUTTER DEEP WARNING"
+          : activeRoute?.overallStatus === "HIGH_RISK"
+            ? "HALF-TIRE ALARM"
+            : "IMPASSABLE FLOOD"
     : selectedRoad
       ? `${selectedRoad.severity} (${selectedRoad.depthCategory})`
       : metrics && metrics.highRisk > 0
@@ -153,13 +155,21 @@ export default function ShareModal({
         : "MONITORING METRO MANILA";
 
   const statusColorClass = isRouteActive
-    ? activeRoute?.overallStatus === "SAFE"
-      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50"
-      : activeRoute?.overallStatus === "CAUTION"
-        ? "bg-amber-500/20 text-amber-400 border-amber-500/50"
-        : activeRoute?.overallStatus === "HIGH_RISK"
-          ? "bg-orange-500/20 text-orange-400 border-orange-500/50"
-          : "bg-rose-500/20 text-rose-400 border-rose-500/50"
+    ? isWalking
+      ? activeRoute?.walkability?.category === "WALKABLE_CLEAR"
+        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50"
+        : activeRoute?.walkability?.category === "WALKABLE_BOOTS"
+          ? "bg-amber-500/20 text-amber-400 border-amber-500/50"
+          : activeRoute?.walkability?.category === "HAZARDOUS_WADING"
+            ? "bg-orange-500/20 text-orange-400 border-orange-500/50"
+            : "bg-rose-500/20 text-rose-400 border-rose-500/50"
+      : activeRoute?.overallStatus === "SAFE"
+        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50"
+        : activeRoute?.overallStatus === "CAUTION"
+          ? "bg-amber-500/20 text-amber-400 border-amber-500/50"
+          : activeRoute?.overallStatus === "HIGH_RISK"
+            ? "bg-orange-500/20 text-orange-400 border-orange-500/50"
+            : "bg-rose-500/20 text-rose-400 border-rose-500/50"
     : selectedRoad
       ? selectedRoad.severity === "NORMAL"
         ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50"
@@ -188,13 +198,31 @@ export default function ShareModal({
     lines.push(`⏱️ *As of:* ${timestampStr}`);
 
     if (isRouteActive && origin && destination && activeRoute) {
-      lines.push(`📍 *Route:* ${origin.name} ➔ ${destination.name}`);
-      lines.push(`📏 *Distance:* ${activeRoute.distanceKm} km (~${activeRoute.durationMin} mins)`);
-      lines.push(`🚨 *Flood Status:* ${statusLabel} (Max Depth: ${maxDepthCm} cm)`);
-      if (activeRoute.totalFloodedKm > 0) {
-        lines.push(`⚠️ *Flooded Segment Length:* ${activeRoute.totalFloodedKm} km`);
+      if (isWalking) {
+        lines.push(`🚶 *Mode:* Walking / Pedestrian`);
+        lines.push(`📍 *Route:* ${origin.name} ➔ ${destination.name}`);
+        lines.push(`📏 *Distance:* ${activeRoute.distanceKm} km (~${activeRoute.durationMin} mins walk)`);
+        lines.push(`🥾 *Walkability:* ${statusLabel} (Score: ${activeRoute.walkability?.score ?? 80}/100)`);
+        lines.push(`🌊 *Max Wading Depth:* ${maxDepthCm} cm`);
+        if (activeRoute.walkability?.wadingDelayMin && activeRoute.walkability.wadingDelayMin > 0) {
+          lines.push(`⏱️ *Wading Delay:* +${activeRoute.walkability.wadingDelayMin} mins slowdown`);
+        }
+        if (activeRoute.walkability?.recommendedGear) {
+          lines.push(`🎒 *Gear:* ${activeRoute.walkability.recommendedGear.join(", ")}`);
+        }
+      } else {
+        lines.push(`🚗 *Mode:* Driving / Vehicle`);
+        lines.push(`📍 *Route:* ${origin.name} ➔ ${destination.name}`);
+        lines.push(`📏 *Distance:* ${activeRoute.distanceKm} km (~${activeRoute.durationMin} mins)`);
+        lines.push(`🚨 *Flood Status:* ${statusLabel} (Max Depth: ${maxDepthCm} cm)`);
+        if (activeRoute.traffic) {
+          lines.push(`🚦 *Traffic Condition:* ${activeRoute.traffic.label} (${activeRoute.traffic.averageSpeedKmH} km/h avg speed)`);
+        }
+        if (activeRoute.totalFloodedKm > 0) {
+          lines.push(`⚠️ *Flooded Segment Length:* ${activeRoute.totalFloodedKm} km`);
+        }
+        lines.push(`🚗 *Passable Vehicles:* ${passableVehicles.join(", ")}`);
       }
-      lines.push(`🚗 *Passable Vehicles:* ${passableVehicles.join(", ")}`);
       if (activeRoute.warnings.length > 0) {
         lines.push(`⚠️ *Advisories:* ${activeRoute.warnings.join("; ")}`);
       }
@@ -475,16 +503,18 @@ export default function ShareModal({
                   </div>
                 </div>
 
-                {/* Section 1: Monitored Road Segment / Driving Route */}
+                {/* Section 1: Monitored Road Segment / Driving or Walking Route */}
                 {isRouteActive && origin && destination && activeRoute ? (
                   <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2.5 space-y-1 shadow-sm">
                     <div className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
-                      <span>Driving Route</span>
-                      <span className="text-blue-400 font-mono text-[10px]">{activeRoute.distanceKm} km • {activeRoute.durationMin} mins</span>
+                      <span>{isWalking ? "🚶 Walking Route" : "🚗 Driving Route"}</span>
+                      <span className="text-blue-400 font-mono text-[10px]">
+                        {activeRoute.distanceKm} km • {activeRoute.durationMin} mins {isWalking ? "walk" : "drive"}
+                      </span>
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center gap-1.5 text-xs">
-                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white font-black text-[9px] flex items-center justify-center flex-shrink-0">
+                        <span className={`w-4 h-4 rounded-full ${isWalking ? "bg-cyan-600" : "bg-blue-600"} text-white font-black text-[9px] flex items-center justify-center flex-shrink-0`}>
                           A
                         </span>
                         <strong className="text-slate-100 text-xs truncate">
@@ -500,6 +530,22 @@ export default function ShareModal({
                         </strong>
                       </div>
                     </div>
+                    {!isWalking && activeRoute.traffic && (
+                      <div className="text-[9px] pt-1 text-slate-300 flex items-center justify-between border-t border-slate-800/80 font-mono">
+                        <span className="text-slate-400">Traffic Status:</span>
+                        <span className="font-bold" style={{ color: activeRoute.traffic.color }}>
+                          🚦 {activeRoute.traffic.label} ({activeRoute.traffic.averageSpeedKmH} km/h)
+                        </span>
+                      </div>
+                    )}
+                    {isWalking && activeRoute.walkability && (
+                      <div className="text-[9px] pt-1 text-slate-300 flex items-center justify-between border-t border-slate-800/80 font-mono">
+                        <span className="text-slate-400">Walkability Score:</span>
+                        <span className="font-bold" style={{ color: activeRoute.walkability.color }}>
+                          🥾 {activeRoute.walkability.score}/100 ({activeRoute.walkability.label})
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : selectedRoad ? (
                   <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2.5 space-y-0.5 shadow-sm">
@@ -520,7 +566,7 @@ export default function ShareModal({
                 {/* Section 2: Flood Risk Assessment */}
                 <div className="p-2.5 rounded-2xl bg-[#070c18]/90 border border-slate-800/80 text-center space-y-1 shadow-sm">
                   <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                    Flood Risk Assessment
+                    {isWalking ? "Walkability & Flood Depth" : "Flood Risk Assessment"}
                   </div>
                   <div>
                     <div
@@ -531,7 +577,7 @@ export default function ShareModal({
                   </div>
                   <div className="text-[10px] text-slate-300 font-mono flex items-center justify-center gap-3 pt-0.5">
                     <span>
-                      Max Depth: <strong className="text-white text-[11px]">{maxDepthCm} cm</strong>
+                      {isWalking ? "Max Wading:" : "Max Depth:"} <strong className="text-white text-[11px]">{maxDepthCm} cm</strong>
                     </span>
                     {activeRoute && (
                       <span>
@@ -564,20 +610,36 @@ export default function ShareModal({
                   </div>
                 </div>
 
-                {/* Section 4: Passable Vehicles Section */}
-                <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2 space-y-1 shadow-sm">
-                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Passable Vehicles</div>
-                  <div className="flex flex-wrap gap-1">
-                    {passableVehicles.map((v: string, i: number) => (
-                      <span
-                        key={i}
-                        className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-[#131d35] text-slate-200 border border-slate-700/80 flex items-center gap-1"
-                      >
-                        <span>🚗</span> {v}
-                      </span>
-                    ))}
+                {/* Section 4: Passable Vehicles OR Pedestrian Gear Section */}
+                {isWalking ? (
+                  <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2 space-y-1 shadow-sm">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Recommended Pedestrian Gear</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(activeRoute?.walkability?.recommendedGear || ["Rubber Boots", "Raincoat"]).map((g: string, i: number) => (
+                        <span
+                          key={i}
+                          className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-[#131d35] text-cyan-200 border border-cyan-700/60 flex items-center gap-1"
+                        >
+                          <span>🥾</span> {g}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="bg-[#070c18]/90 border border-slate-800/80 rounded-2xl p-2 space-y-1 shadow-sm">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Passable Vehicles</div>
+                    <div className="flex flex-wrap gap-1">
+                      {passableVehicles.map((v: string, i: number) => (
+                        <span
+                          key={i}
+                          className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-[#131d35] text-slate-200 border border-slate-700/80 flex items-center gap-1"
+                        >
+                          <span>🚗</span> {v}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Advisories if present */}
                 {isRouteActive && activeRoute?.warnings && activeRoute.warnings.length > 0 && (
@@ -643,7 +705,7 @@ export default function ShareModal({
                   <div className="flex items-center justify-between text-xs">
                     <div className="space-y-1">
                       <div className="flex items-center gap-1.5 text-xs">
-                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white font-black text-[9px] flex items-center justify-center">
+                        <span className={`w-4 h-4 rounded-full ${isWalking ? "bg-cyan-600" : "bg-blue-600"} text-white font-black text-[9px] flex items-center justify-center`}>
                           A
                         </span>
                         <strong className="text-slate-100 text-xs truncate max-w-[160px] sm:max-w-[220px]">
@@ -662,7 +724,7 @@ export default function ShareModal({
 
                     <div className="text-right font-mono">
                       <div className="text-xs font-bold text-white">{activeRoute.durationMin} mins</div>
-                      <div className="text-[10px] text-slate-400">{activeRoute.distanceKm} km</div>
+                      <div className="text-[10px] text-slate-400">{activeRoute.distanceKm} km {isWalking ? "walk" : "drive"}</div>
                     </div>
                   </div>
                 </div>
@@ -679,7 +741,7 @@ export default function ShareModal({
               {/* Status & Stats Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                 <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2 space-y-0.5">
-                  <div className="text-[9px] font-semibold text-slate-400 uppercase">Status</div>
+                  <div className="text-[9px] font-semibold text-slate-400 uppercase">{isWalking ? "Walkability" : "Status"}</div>
                   <div className="text-xs font-bold">
                     <span className={`px-2 py-0.5 rounded-md border inline-block text-[10px] whitespace-normal break-words ${statusColorClass}`}>
                       {statusLabel}
@@ -688,16 +750,20 @@ export default function ShareModal({
                 </div>
 
                 <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2 space-y-0.5">
-                  <div className="text-[9px] font-semibold text-slate-400 uppercase">Max Depth</div>
+                  <div className="text-[9px] font-semibold text-slate-400 uppercase">{isWalking ? "Wading Depth" : "Max Depth"}</div>
                   <div className="text-xs font-black font-mono text-cyan-400">
                     {maxDepthCm} <span className="text-[9px] font-sans text-slate-400">cm</span>
                   </div>
                 </div>
 
                 <div className="col-span-2 sm:col-span-1 bg-slate-950/90 border border-slate-800 rounded-xl p-2 space-y-0.5">
-                  <div className="text-[9px] font-semibold text-slate-400 uppercase">Telemetry Signal</div>
+                  <div className="text-[9px] font-semibold text-slate-400 uppercase">{isWalking ? "Wading Delay" : "Traffic"}</div>
                   <div className="text-xs font-mono text-emerald-400 truncate">
-                    {metrics ? `${metrics.peakWater.toFixed(2)}m Peak` : "Live Feed"}
+                    {isWalking
+                      ? `+${activeRoute?.walkability?.wadingDelayMin ?? 0}m delay`
+                      : activeRoute?.traffic
+                      ? activeRoute.traffic.label
+                      : metrics ? `${metrics.peakWater.toFixed(2)}m Peak` : "Live Feed"}
                   </div>
                 </div>
               </div>
@@ -724,20 +790,36 @@ export default function ShareModal({
                 </div>
               </div>
 
-              {/* Passable Vehicles Badges */}
-              <div className="space-y-1">
-                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Passable Vehicles</div>
-                <div className="flex flex-wrap gap-1">
-                  {passableVehicles.map((v: string, i: number) => (
-                    <span
-                      key={i}
-                      className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 border border-slate-700 flex items-center gap-1"
-                    >
-                      <span>🚗</span> {v}
-                    </span>
-                  ))}
+              {/* Passable Vehicles or Recommended Gear Badges */}
+              {isWalking ? (
+                <div className="space-y-1">
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Recommended Gear</div>
+                  <div className="flex flex-wrap gap-1">
+                    {(activeRoute?.walkability?.recommendedGear || ["Rubber Boots", "Raincoat"]).map((g: string, i: number) => (
+                      <span
+                        key={i}
+                        className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-cyan-300 border border-cyan-800 flex items-center gap-1"
+                      >
+                        <span>🥾</span> {g}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Passable Vehicles</div>
+                  <div className="flex flex-wrap gap-1">
+                    {passableVehicles.map((v: string, i: number) => (
+                      <span
+                        key={i}
+                        className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 border border-slate-700 flex items-center gap-1"
+                      >
+                        <span>🚗</span> {v}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Advisories & Warnings if any */}
               {isRouteActive && activeRoute?.warnings && activeRoute.warnings.length > 0 && (
