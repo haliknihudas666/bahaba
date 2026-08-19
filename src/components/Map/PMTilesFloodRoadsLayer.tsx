@@ -4,7 +4,7 @@
 // Bahaba – Predictive Flood Road Network Vector Layer (PMTiles)
 // ---------------------------------------------------------------------------
 //
-// Renders the full Philippines vector road network from /philippines-final.pmtiles
+// Renders the full Philippines vector road network from Hugging Face PMTiles
 // using protomaps-leaflet on HTML5 Canvas.
 //
 // Live Hydro-Predictive Coloring:
@@ -24,8 +24,9 @@ import * as protomapsL from "protomaps-leaflet";
 import type { LiveStation } from "@/types";
 import { estimateInundationAtLocation } from "@/lib/engine/liveFloodGrid";
 
-/** Local PMTiles vector archive in /public */
-const PH_ROADS_PMTILES_URL = "/philippines-final.pmtiles";
+/** Philippines Vector Road Network PMTiles hosted on Hugging Face */
+const PH_ROADS_PMTILES_URL =
+  "https://huggingface.co/datasets/Jrabb1t/philippines-map-data/resolve/main/philippines-final.pmtiles";
 
 interface GeoBBox {
   minLat: number;
