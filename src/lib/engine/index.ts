@@ -19,6 +19,11 @@ export type {
   RiskLevel,
 } from "@/types/flood-engine";
 
+export {
+  NOAH_DEPTH_TABLE,
+  NOAH_DESIGN_STORM_MM_HR,
+} from "@/types/flood-engine";
+
 export type {
   RoadSeverity,
   RoadRiskResult,

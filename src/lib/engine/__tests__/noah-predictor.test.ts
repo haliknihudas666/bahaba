@@ -18,19 +18,23 @@ function runNoahPredictorTests() {
   console.log("\n🧪 Running NOAH Offline Inundation & Risk Engine Test Suite...\n");
 
   // Test 1: Water Depth Formula - Baseline / Dry Weather (0 mm/hr, high elevation 14m, level 1 hazard)
-  // Water Depth = Net Rain (0) + (1 * 5) - (14 * 0.5 = 7) = -2 -> 0 cm
+  // New model: 0 rain → 0 activation → NOAH hazard contributes 0 cm
+  // Net Rain = max(0, 0 - 25) = 0
+  // Activation = clamp(0/60, 0, 1) = 0 → hazardContribution = 15 * 0 = 0
+  // Elev Factor = 14 * 0.5 = 7 → rawDepth = 0 + 0 - 7 = -7 → 0 cm
   const dryDepth = calculateWaterDepth(0, 0, 1, 14.0, 25);
   assert(dryDepth === 0, `Dry weather returns 0 cm standing water depth (calculated: ${dryDepth} cm)`);
 
   // Test 2: Water Depth Formula - Heavy Rain on Low Elevation España Blvd (45 mm/hr rain, 2.2m elevation, Level 3 Hazard)
-  // Net Rain = 45 - 25 = 20
-  // Hazard = 3 * 5 = 15
+  // New model: rainfall activation = clamp(45/60, 0, 1) = 0.75
+  // NOAH Level 3 max depth = 80 cm → contribution = 80 * 0.75 = 60 cm
+  // Net Rain = max(0, 45 - 25) = 20
   // Elev Factor = 2.2 * 0.5 = 1.1
-  // Total Depth = 20 + 15 - 1.1 = 33.9 cm
+  // Total Depth = 20 + 60 - 1.1 = 78.9 cm
   const espanaDepth = calculateWaterDepth(45, 0, 3, 2.2, 25);
   assert(
-    Math.abs(espanaDepth - 33.9) < 0.2,
-    `España Blvd heavy rain (45mm/hr, elev 2.2m, level 3) computes ~33.9 cm depth (calculated: ${espanaDepth} cm)`
+    Math.abs(espanaDepth - 78.9) < 0.2,
+    `España Blvd heavy rain (45mm/hr, elev 2.2m, level 3) computes ~78.9 cm depth (calculated: ${espanaDepth} cm)`
   );
 
   // Test 3: Risk Classification Mapping
@@ -71,7 +75,9 @@ function runNoahPredictorTests() {
   const queryResult = getRoadsInBBox(manilaBBox);
   assert(queryResult.length > 0, `getRoadsInBBox returned ${queryResult.length} road segments inside Manila viewport`);
 
-  // Test 6: Full Predictor Integration
+  // Test 6: Full Predictor Integration (50 mm/hr, 20mm 24h acc, hazard 3)
+  // activation = clamp(50/60, 0, 1) = 0.8333 → contribution = 80 * 0.8333 ≈ 66.7
+  // netRain = max(0, 52 - 25) = 27 → depth ≈ 27 + 66.7 - 1.1 = 92.6 cm → CRITICAL
   const fullPred = predictRoadFloodRisk(espanaRoad, 50, 20);
   assert(fullPred.roadName === "España Blvd", `Predictor retains road name (${fullPred.roadName})`);
   assert(fullPred.waterDepthCm > 30, `Calculated depth ${fullPred.waterDepthCm} cm > 30 cm`);

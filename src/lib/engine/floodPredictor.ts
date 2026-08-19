@@ -1,4 +1,5 @@
 import type { NoahRoadSegment } from "@/types/flood-engine";
+import { NOAH_DEPTH_TABLE, NOAH_DESIGN_STORM_MM_HR } from "@/types/flood-engine";
 
 export type FloodRiskCategory = "NORMAL" | "LOW" | "HIGH" | "CRITICAL";
 
@@ -27,9 +28,20 @@ export interface NoahRoadFloodPrediction {
 }
 
 /**
- * Calculates estimated standing water accumulation depth (D_water in cm) using:
- * Water Depth = (Net Rain) + (NOAH Hazard Multiplier * 5) - (Elevation Factor)
- * 
+ * Calculates estimated standing water accumulation depth (D_water in cm)
+ * using a rainfall-activated NOAH hazard model:
+ *
+ *   Water Depth = (Net Rain) + (NOAH Hazard Contribution) - (Elevation Factor)
+ *
+ * The NOAH hazard contribution is scaled by a rainfall activation ratio
+ * rather than a flat multiplier, producing realistic flood depth estimates
+ * that correlate with actual weather conditions:
+ *
+ *   rainfallActivation = clamp(rainMmHr / designStormIntensity, 0, 1)
+ *   saturationBoost    = clamp((rain24h - 100) / 100, 0, 0.3)
+ *   activation         = clamp(rainfallActivation + saturationBoost, 0, 1)
+ *   noahContribution   = NOAH_DEPTH_TABLE[hazardLevel] * activation
+ *
  * @param rainMmHr Live rainfall intensity in mm/hr
  * @param rain24hAccMm Cumulative 24-hour rainfall accumulation in mm
  * @param noahHazardLevel UP Project NOAH hazard scale (0 = None, 1 = Low/5-yr, 2 = Medium/25-yr, 3 = High/100-yr)
@@ -54,15 +66,27 @@ export function calculateWaterDepth(
   const grossRainfallImpact = safeRainMmHr + safeRain24h * 0.1;
   const netRain = Math.max(0, grossRainfallImpact - safeDrainage);
 
-  // 2. NOAH Hazard Multiplier Component: (noahHazardLevel * 5)
-  // Level 0 -> +0cm, Level 1 -> +5cm, Level 2 -> +10cm, Level 3 -> +15cm
-  const hazardFactor = safeHazardLevel * 5;
+  // 2. Rainfall-Activated NOAH Hazard Contribution
+  //    Instead of a flat multiplier (old: hazardLevel * 5), scale by how close
+  //    the current rainfall is to the 100-year design storm intensity.
+  //    At 0 mm/hr → 0 contribution. At 60+ mm/hr → full NOAH depth table value.
+  const rainfallActivation = Math.min(1, Math.max(0, safeRainMmHr / NOAH_DESIGN_STORM_MM_HR));
+
+  //    24h saturation boost: sustained rain > 100mm over 24h indicates soil
+  //    saturation and accumulated flooding, even if instantaneous rate drops.
+  const saturationBoost = safeRain24h > 100
+    ? Math.min(0.3, (safeRain24h - 100) / 100 * 0.3)
+    : 0;
+
+  const totalActivation = Math.min(1, rainfallActivation + saturationBoost);
+  const maxNoahDepthCm = NOAH_DEPTH_TABLE[safeHazardLevel] ?? 0;
+  const hazardContribution = maxNoahDepthCm * totalActivation;
 
   // 3. Elevation Factor Component: Higher elevation reduces standing water depth
   const elevationFactor = Math.max(0, safeElevation * 0.5);
 
   // 4. Combined Water Depth (cm)
-  const rawDepthCm = netRain + hazardFactor - elevationFactor;
+  const rawDepthCm = netRain + hazardContribution - elevationFactor;
 
   // Constrain depth to non-negative values
   return Math.max(0, Math.round(rawDepthCm * 10) / 10);

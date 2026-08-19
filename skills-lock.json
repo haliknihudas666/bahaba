@@ -5,31 +5,31 @@
       "source": "anysearch-ai/anysearch-skill",
       "sourceType": "github",
       "skillPath": "SKILL.md",
-      "computedHash": "a0289ea550c3c55f3ed67673e428fcf4f9ff0820dc4cf00571cf7f77d5f03ff9"
+      "computedHash": "d919858cfbccfb37f1cfef6c79f5b05a9147935abc014689e93d4401971f18b8"
     },
     "find-docs": {
       "source": "upstash/context7",
       "sourceType": "github",
       "skillPath": "skills/find-docs/SKILL.md",
-      "computedHash": "93ec2d2786d7e83973252383875c4f345a2ee7cbbd08a1ab38e5201b214640ee"
+      "computedHash": "08eb9ec903138793426445922381c37ae8daf3a4898ab640a904550710ab13d8"
     },
     "nextjs-app-router-patterns": {
       "source": "wshobson/agents",
       "sourceType": "github",
       "skillPath": "plugins/frontend-mobile-development/skills/nextjs-app-router-patterns/SKILL.md",
-      "computedHash": "b4fea42eecf1f803155ef7fa133d5286ee8f2dbba3e616954e9e43c6f0ffc144"
+      "computedHash": "3a46e9093baecb3a85819529ce05006f817663f48d9e872868c32ae6049c0d5c"
     },
     "nextjs-react-typescript": {
       "source": "mindrally/skills",
       "sourceType": "github",
       "skillPath": "nextjs-react-typescript/SKILL.md",
-      "computedHash": "eb995cc826bf48498e0e90969fc7dadfa2ec634002c26cfcfde565134cefa738"
+      "computedHash": "52067402daf8388ba7970478e0ba1f350f1868a65a62ae2bf6f4dc1ac3cf3e88"
     },
     "research": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/engineering/research/SKILL.md",
-      "computedHash": "bd3e2c6826671d82c86ed0da3dac3370ebcf63b0fe847f91bb444e1fb7dac21b"
+      "computedHash": "0ce7d7a48175ab30c80240df350a73c216489f775324c8d27c8a10b1b38a49bf"
     }
   }
 }

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LiveStation } from "@/types";
 import RoadFloodLayer from "./RoadFloodLayer";
 import NOAHPredictedRoadsLayer from "./NOAHPredictedRoadsLayer";
+import NOAHFloodHazardLayer from "./NOAHFloodHazardLayer";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
 import type { RouteSegmentData, TravelMode } from "@/lib/engine/routeSolver";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
@@ -55,6 +56,7 @@ export default function RoadFloodMap({
   const routeLayerGroupRef = useRef<any>(null);
   const stationMarkersRef = useRef<Map<string, any>>(new Map());
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [showFloodHazard, setShowFloodHazard] = useState(false);
 
   // 1. Initialize Leaflet Map Instance with Canvas Renderer
   useEffect(() => {
@@ -532,6 +534,10 @@ export default function RoadFloodMap({
       {/* Embedded Road Flood Overlay & NOAH BBox Vector Layer */}
       {mapLoaded && leafletMapRef.current && (
         <>
+          <NOAHFloodHazardLayer
+            map={leafletMapRef.current}
+            visible={showFloodHazard}
+          />
           <RoadFloodLayer
             map={leafletMapRef.current}
             stations={stations}
@@ -541,6 +547,120 @@ export default function RoadFloodMap({
           <NOAHPredictedRoadsLayer map={leafletMapRef.current} />
         </>
       )}
+
+      {/* ── NOAH Flood Zones Toggle & Legend ─────────────────────────── */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 62,
+          left: 16,
+          zIndex: 1000,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          alignItems: "flex-start",
+        }}
+      >
+        {/* Active Hazard Legend Badge */}
+        {showFloodHazard && (
+          <div
+            style={{
+              backgroundColor: "rgba(15, 23, 42, 0.95)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgba(56, 189, 248, 0.3)",
+              borderRadius: 12,
+              padding: "8px 12px",
+              boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
+              fontSize: 11,
+              color: "#cbd5e1",
+              fontFamily: "system-ui, -apple-system, sans-serif",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              minWidth: 160,
+              animation: "fadeIn 0.2s ease-out",
+            }}
+          >
+            <div style={{ fontWeight: 700, color: "#38bdf8", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+              UP NOAH 100-Yr Flood Map
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: "rgba(239, 68, 68, 0.8)", border: "1px solid #ef4444" }} />
+              <span>High Hazard (&gt;1.5m)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: "rgba(249, 115, 22, 0.8)", border: "1px solid #f97316" }} />
+              <span>Medium (0.5–1.5m)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: "rgba(59, 130, 246, 0.8)", border: "1px solid #3b82f6" }} />
+              <span>Low Hazard (&lt;0.5m)</span>
+            </div>
+          </div>
+        )}
+
+        {/* Toggle Button */}
+        <button
+          id="noah-flood-zones-toggle"
+          onClick={() => setShowFloodHazard((prev) => !prev)}
+          title="Toggle UP NOAH 100-Year Flood Hazard Map"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 14px",
+            borderRadius: 14,
+            border: showFloodHazard
+              ? "1.5px solid rgba(56, 189, 248, 0.6)"
+              : "1px solid rgba(51, 65, 85, 0.8)",
+            backgroundColor: showFloodHazard
+              ? "rgba(14, 116, 144, 0.85)"
+              : "rgba(15, 23, 42, 0.92)",
+            color: showFloodHazard ? "#e0f2fe" : "#94a3b8",
+            fontSize: 12,
+            fontWeight: 600,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            cursor: "pointer",
+            backdropFilter: "blur(12px)",
+            boxShadow: showFloodHazard
+              ? "0 4px 20px rgba(14, 116, 144, 0.4), 0 0 0 1px rgba(56, 189, 248, 0.15)"
+              : "0 4px 14px rgba(0, 0, 0, 0.4)",
+            transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+            userSelect: "none" as const,
+            WebkitTapHighlightColor: "transparent",
+            letterSpacing: "0.01em",
+          }}
+          onMouseEnter={(e) => {
+            if (!showFloodHazard) {
+              e.currentTarget.style.backgroundColor = "rgba(30, 41, 59, 1)";
+              e.currentTarget.style.color = "#e2e8f0";
+              e.currentTarget.style.borderColor = "rgba(71, 85, 105, 0.9)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!showFloodHazard) {
+              e.currentTarget.style.backgroundColor = "rgba(15, 23, 42, 0.92)";
+              e.currentTarget.style.color = "#94a3b8";
+              e.currentTarget.style.borderColor = "rgba(51, 65, 85, 0.8)";
+            }
+          }}
+        >
+          <span style={{ fontSize: 15, lineHeight: 1 }}>🌊</span>
+          <span>Flood Zones</span>
+          {showFloodHazard && (
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                backgroundColor: "#38bdf8",
+                boxShadow: "0 0 6px #38bdf8",
+                marginLeft: 2,
+              }}
+            />
+          )}
+        </button>
+      </div>
 
       <style jsx global>{`
         @keyframes ping {
