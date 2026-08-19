@@ -9,7 +9,6 @@ import type { LiveStation } from "@/types";
 import PMTilesFloodRoadsLayer from "./PMTilesFloodRoadsLayer";
 import NOAHFloodHazardLayer from "./NOAHFloodHazardLayer";
 import FloodHeatmapLayer from "./FloodHeatmapLayer";
-import MapLayerControlCard from "./MapLayerControlCard";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
 import type { RouteSegmentData, TravelMode } from "@/lib/engine/routeSolver";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
@@ -37,6 +36,10 @@ interface RoadFloodMapProps {
   travelMode?: TravelMode;
   /** Trigger integer to recenter map to Metro Manila default center */
   recenterTrigger?: number;
+  /** Flood Heatmap overlay active state */
+  showHeatmap?: boolean;
+  /** UP NOAH Hazard PMTiles overlay active state */
+  showHazard?: boolean;
 }
 
 export default function RoadFloodMap({
@@ -51,14 +54,14 @@ export default function RoadFloodMap({
   customRoads,
   travelMode = "driving",
   recenterTrigger = 0,
+  showHeatmap = true,
+  showHazard = false,
 }: RoadFloodMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
   const routeLayerGroupRef = useRef<any>(null);
   const stationMarkersRef = useRef<Map<string, any>>(new Map());
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [showFloodHazard, setShowFloodHazard] = useState(false);
-  const [showFloodHeatmap, setShowFloodHeatmap] = useState(true);
 
   // 1. Initialize Leaflet Map Instance with Canvas Renderer
   useEffect(() => {
@@ -539,11 +542,11 @@ export default function RoadFloodMap({
           <FloodHeatmapLayer
             map={leafletMapRef.current}
             stations={stations}
-            visible={showFloodHeatmap}
+            visible={showHeatmap}
           />
           <NOAHFloodHazardLayer
             map={leafletMapRef.current}
-            visible={showFloodHazard}
+            visible={showHazard}
           />
           <PMTilesFloodRoadsLayer
             map={leafletMapRef.current}
@@ -552,14 +555,6 @@ export default function RoadFloodMap({
           />
         </>
       )}
-
-      {/* ── MAP OVERLAYS & PREDICTION CONTROLS CARD ────────────────────── */}
-      <MapLayerControlCard
-        showHeatmap={showFloodHeatmap}
-        onToggleHeatmap={() => setShowFloodHeatmap((prev) => !prev)}
-        showHazard={showFloodHazard}
-        onToggleHazard={() => setShowFloodHazard((prev) => !prev)}
-      />
 
       <style jsx global>{`
         @keyframes ping {
@@ -590,8 +585,8 @@ export default function RoadFloodMap({
           pointer-events: none !important;
         }
         .leaflet-control-zoom {
-          margin-right: 16px !important;
-          margin-bottom: 58px !important;
+          margin-right: 12px !important;
+          margin-bottom: 60px !important;
           border: 1px solid rgba(51, 65, 85, 0.8) !important;
           border-radius: 14px !important;
           overflow: hidden !important;

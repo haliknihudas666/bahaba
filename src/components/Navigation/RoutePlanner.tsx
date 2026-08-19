@@ -61,15 +61,15 @@ export default function RoutePlanner({
 
   return (
     <div
-      className={`absolute top-16 sm:top-20 left-3 sm:left-4 bottom-4 sm:bottom-6 z-[450] w-[calc(100vw-24px)] sm:w-[410px] md:w-[430px] max-w-[calc(100vw-32px)] flex flex-col pointer-events-auto transition-all duration-300 ease-in-out ${
+      className={`fixed inset-0 sm:inset-auto sm:top-20 sm:left-4 sm:bottom-6 z-[550] w-full sm:w-[410px] md:w-[430px] max-w-full sm:max-w-[calc(100vw-32px)] flex flex-col pointer-events-auto transition-all duration-300 ease-in-out ${
         isOpen
           ? "translate-x-0 opacity-100"
-          : "-translate-x-[calc(100%+32px)] pointer-events-none opacity-0"
+          : "-translate-x-full sm:-translate-x-[calc(100%+32px)] pointer-events-none opacity-0"
       }`}
     >
-      <div className="bg-slate-900/92 backdrop-blur-2xl border border-slate-800/90 rounded-3xl shadow-2xl flex flex-col h-full max-h-full overflow-hidden">
+      <div className="bg-slate-950 sm:bg-slate-900/95 sm:backdrop-blur-2xl border-0 sm:border border-slate-800/90 rounded-none sm:rounded-3xl shadow-2xl flex flex-col h-full max-h-full overflow-hidden">
         {/* Sidebar Header & Toggle */}
-        <div className="p-3.5 sm:p-4 border-b border-slate-800/80 flex items-center justify-between gap-2">
+        <div className="p-3.5 sm:p-4 border-b border-slate-800/80 flex items-center justify-between gap-2 flex-shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-base">{isWalking ? "🚶" : "🚗"}</span>
             <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
@@ -78,11 +78,12 @@ export default function RoutePlanner({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all active:scale-95"
+            className="flex items-center gap-1 px-2.5 py-1 sm:p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all active:scale-95 text-xs font-semibold"
             title="Minimize directions panel"
           >
+            <span className="sm:hidden">Close</span>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>

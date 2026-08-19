@@ -48,8 +48,9 @@ export default function HomePage() {
   const [isDonationModalOpen, setIsDonationModalOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
-  const [isLegendOpen, setIsLegendOpen] = useState<boolean>(false);
   const [recenterTrigger, setRecenterTrigger] = useState<number>(0);
+  const [showFloodHeatmap, setShowFloodHeatmap] = useState<boolean>(true);
+  const [showFloodHazard, setShowFloodHazard] = useState<boolean>(false);
 
   // Travel Mode (Driving vs Walking) & Vehicle Type State
   const [travelMode, setTravelMode] = useState<TravelMode>("driving");
@@ -351,6 +352,8 @@ export default function HomePage() {
           routeSegments={activeRoute?.segmentedRoute}
           travelMode={travelMode}
           recenterTrigger={recenterTrigger}
+          showHeatmap={showFloodHeatmap}
+          showHazard={showFloodHazard}
           onSelectRoad={(risk) => setSelectedRoadRisk(risk)}
         />
       </div>
@@ -393,7 +396,7 @@ export default function HomePage() {
       {!isSidebarOpen && (
         <button
           onClick={() => setIsSidebarOpen(true)}
-          className="absolute top-18 sm:top-20 left-3 sm:left-4 z-[450] flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-white border border-slate-700 hover:border-cyan-500/60 shadow-2xl backdrop-blur-xl transition-all active:scale-95"
+          className="absolute top-[54px] sm:top-20 left-2.5 sm:left-4 z-[450] flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-white border border-slate-700 hover:border-cyan-500/60 shadow-2xl backdrop-blur-xl transition-all active:scale-95"
           title="Open Directions & Route Panel"
         >
           <span>🧭</span>
@@ -404,18 +407,18 @@ export default function HomePage() {
         </button>
       )}
 
-      {/* ── 5. FLOATING MAP CONTROLS & LEGEND DOCK (Bottom Right) ──────── */}
+      {/* ── 5. FLOATING MAP CONTROLS & DOCK (Bottom Right) ─────────────── */}
       <MapLegend
-        isOpen={isLegendOpen}
-        onToggle={() => setIsLegendOpen(!isLegendOpen)}
-        onClose={() => setIsLegendOpen(false)}
         travelMode={travelMode}
+        showHeatmap={showFloodHeatmap}
+        onToggleHeatmap={() => setShowFloodHeatmap((prev) => !prev)}
+        showHazard={showFloodHazard}
+        onToggleHazard={() => setShowFloodHazard((prev) => !prev)}
         onRecenter={handleRecenter}
         onOpenNearestFinder={() => {
           setActiveDrawerTab("nearest-finder");
           setIsDrawerOpen(true);
         }}
-        onOpenDonationModal={() => setIsDonationModalOpen(true)}
       />
 
       {/* ── 6. SLIDE-UP TELEMETRY & DATA TABLES DRAWER ─────────────────── */}

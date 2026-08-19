@@ -33,28 +33,28 @@ export default function MapHeaderControls({
   onOpenDrawer,
 }: MapHeaderControlsProps) {
   return (
-    <header className="absolute top-3 left-3 right-3 sm:top-4 sm:left-4 sm:right-4 z-[500] pointer-events-none flex items-center justify-between gap-2.5 sm:gap-4">
+    <header className="absolute top-2.5 left-2.5 right-2.5 sm:top-4 sm:left-4 sm:right-4 z-[500] pointer-events-none flex items-center justify-between gap-1.5 sm:gap-4">
       {/* Left: Brand Logo & Live Pulse */}
-      <div className="pointer-events-auto flex items-center gap-2 sm:gap-3 bg-slate-900/90 backdrop-blur-xl border border-slate-800/90 px-3 py-2 rounded-2xl shadow-2xl">
-        <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-base sm:text-lg shadow-md shadow-cyan-500/30 flex-shrink-0">
+      <div className="pointer-events-auto flex items-center gap-2 bg-slate-900/90 backdrop-blur-xl border border-slate-800/90 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl shadow-2xl flex-shrink-0">
+        <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm sm:text-lg shadow-md shadow-cyan-500/30 flex-shrink-0">
           🌊
         </div>
-        <div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <h1 className="text-sm sm:text-base font-black tracking-tight text-white">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xs sm:text-base font-black tracking-tight text-white leading-none">
               Baha Ba?
             </h1>
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
             </span>
-            <span className="hidden sm:inline">PAGASA Live</span>
-            {lastUpdatedFormatted && (
-              <span className="font-mono text-slate-300">
-                {lastUpdatedFormatted}
-              </span>
+          </div>
+          <div className="text-[9px] sm:text-[10px] text-slate-400 leading-tight">
+            <span className="hidden sm:inline">PAGASA Live • </span>
+            {lastUpdatedFormatted ? (
+              <span className="font-mono text-slate-300">{lastUpdatedFormatted}</span>
+            ) : (
+              <span>Live</span>
             )}
           </div>
         </div>
@@ -128,34 +128,34 @@ export default function MapHeaderControls({
       </div>
 
       {/* Right: Quick Action Buttons */}
-      <div className="pointer-events-auto flex items-center gap-2">
+      <div className="pointer-events-auto flex items-center gap-1 sm:gap-2">
         {/* Relief & Donation Drive Button */}
         <button
           onClick={onOpenDonationModal}
-          className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white border border-rose-400/40 shadow-xl shadow-rose-950/50 backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center gap-1 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white border border-rose-400/40 shadow-xl shadow-rose-950/50 backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
           title="Official Angat Buhay Flood Relief & Donation Channels"
         >
-          <span className="text-rose-200">❤️</span>
+          <span className="text-xs">❤️</span>
           <span className="hidden sm:inline">Donate</span>
         </button>
 
         {/* Tables & Stations Drawer Button */}
         <button
           onClick={onOpenDrawer}
-          className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-cyan-500/50 shadow-xl backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center gap-1 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-cyan-500/50 shadow-xl backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
           title="Open PAGASA Stations & Monitored Road Tables"
         >
-          <span>📊</span>
-          <span className="hidden sm:inline">Data Tables</span>
+          <span className="text-xs">📊</span>
+          <span className="hidden sm:inline">Tables</span>
           {metrics.highRisk > 0 && (
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
           )}
         </button>
 
         {/* Share Report Button */}
         <button
           onClick={onOpenShareModal}
-          className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 hover:border-cyan-500/70 shadow-xl backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center gap-1 text-[11px] sm:text-xs font-bold p-1.5 sm:px-3 sm:py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 hover:border-cyan-500/70 shadow-xl backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
           title="Generate Shareable Flood Safety Report Card"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -173,7 +173,7 @@ export default function MapHeaderControls({
         <button
           onClick={onSync}
           disabled={syncing}
-          className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-xl shadow-cyan-950/50 backdrop-blur-xl transition-all disabled:opacity-50 active:scale-95 flex-shrink-0"
+          className="flex items-center gap-1 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-xl shadow-cyan-950/50 backdrop-blur-xl transition-all disabled:opacity-50 active:scale-95 flex-shrink-0"
           title="Sync Latest PAGASA & Weather Telemetry"
         >
           <svg
@@ -189,7 +189,7 @@ export default function MapHeaderControls({
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          <span>{syncing ? "Syncing" : "Sync"}</span>
+          <span className="hidden sm:inline">{syncing ? "Syncing" : "Sync"}</span>
         </button>
       </div>
     </header>
