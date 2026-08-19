@@ -29,3 +29,13 @@ export type {
   RoadRiskResult,
   GeoJSONLineStringFeature,
 } from "./roadRisk";
+
+export {
+  interpolateRainfall,
+  estimateInundationAtLocation,
+  generateFloodHeatmapPoints,
+  METRO_MANILA_FLOOD_HOTSPOTS,
+  type FloodHeatmapPoint,
+  type SpatialInundationEstimate,
+} from "./liveFloodGrid";
+

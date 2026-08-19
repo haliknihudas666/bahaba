@@ -178,5 +178,14 @@ export interface NoahRoadSegment {
   elevationM: number;
   noahHazardLevel: number;
   drainageCapacity: number;
+  /** Official DPWH Route Number (e.g. "N1 / AH26", "N170", "N2", "N11") */
+  nationalRoute?: string;
+  /** DPWH Highway classification */
+  roadClassification?: "Primary National" | "Secondary National" | "Tertiary National" | "Urban Arterial";
+  /** Administrative region (e.g. "NCR (Metro Manila)", "Region III (Central Luzon)") */
+  region?: string;
+  /** Detailed description or corridor notes */
+  description?: string;
 }
+
 

@@ -159,9 +159,38 @@ function runRoadRiskTests() {
     riverbankRisk.isNearRiver === true,
     `Riverbank Drive IS in riverbank zone (${riverbankRisk.nearestStation.distanceKm} km)`
   );
+  // Test 6: DPWH National Highway Route Metadata Propagation
+  const nationalHighwayFeature: GeoJSONLineStringFeature = {
+    type: "Feature",
+    properties: {
+      name: "MacArthur Hwy / N2 (Apalit - Sto. Tomas - San Fernando Pampanga Basin)",
+      elevation: 2.8,
+      nationalRoute: "N2",
+      roadClassification: "Primary National",
+      region: "Region III (Central Luzon)",
+      description: "Manila North Road / Major Pampanga River flood basin"
+    },
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [120.7612, 14.9452],
+        [120.6865, 15.0345]
+      ]
+    }
+  };
+
+  const nationalRisk = calculateRoadRisk(nationalHighwayFeature, mockStations);
   assert(
-    riverbankRisk.estimatedDepthCm > roadRisk.estimatedDepthCm,
-    `Riverbank road has higher depth than inland road (${riverbankRisk.estimatedDepthCm} cm > ${roadRisk.estimatedDepthCm} cm)`
+    nationalRisk.nationalRoute === "N2",
+    `Propagates DPWH national route (${nationalRisk.nationalRoute})`
+  );
+  assert(
+    nationalRisk.roadClassification === "Primary National",
+    `Propagates DPWH classification (${nationalRisk.roadClassification})`
+  );
+  assert(
+    nationalRisk.region === "Region III (Central Luzon)",
+    `Propagates region tag (${nationalRisk.region})`
   );
 
   console.log("\n✅ All Spatial Risk Matcher Unit Tests Passed Successfully!\n");

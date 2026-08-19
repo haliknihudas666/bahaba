@@ -25,6 +25,12 @@ export interface NoahRoadFloodPrediction {
   label: string;
   lineWeight: number;
   passableVehicles: string[];
+  /** Official DPWH Route Number (e.g. "N1 / AH26", "N170", "N2", "N11") */
+  nationalRoute?: string;
+  /** DPWH Highway classification */
+  roadClassification?: string;
+  /** Administrative region */
+  region?: string;
 }
 
 /**
@@ -173,5 +179,8 @@ export function predictRoadFloodRisk(
     label: classification.label,
     lineWeight: classification.lineWeight,
     passableVehicles: classification.passableVehicles,
+    nationalRoute: road.nationalRoute,
+    roadClassification: road.roadClassification,
+    region: road.region,
   };
 }

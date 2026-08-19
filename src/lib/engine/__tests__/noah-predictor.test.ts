@@ -78,10 +78,19 @@ function runNoahPredictorTests() {
   // Test 6: Full Predictor Integration (50 mm/hr, 20mm 24h acc, hazard 3)
   // activation = clamp(50/60, 0, 1) = 0.8333 → contribution = 80 * 0.8333 ≈ 66.7
   // netRain = max(0, 52 - 25) = 27 → depth ≈ 27 + 66.7 - 1.1 = 92.6 cm → CRITICAL
-  const fullPred = predictRoadFloodRisk(espanaRoad, 50, 20);
+  const espanaWithRoute: NoahRoadSegment = {
+    ...espanaRoad,
+    nationalRoute: "N170",
+    roadClassification: "Primary National",
+    region: "NCR (Metro Manila)",
+  };
+  const fullPred = predictRoadFloodRisk(espanaWithRoute, 50, 20);
   assert(fullPred.roadName === "España Blvd", `Predictor retains road name (${fullPred.roadName})`);
   assert(fullPred.waterDepthCm > 30, `Calculated depth ${fullPred.waterDepthCm} cm > 30 cm`);
   assert(fullPred.riskCategory === "CRITICAL", `Risk category is CRITICAL`);
+  assert(fullPred.nationalRoute === "N170", `Predictor retains national route (${fullPred.nationalRoute})`);
+  assert(fullPred.roadClassification === "Primary National", `Predictor retains road classification (${fullPred.roadClassification})`);
+  assert(fullPred.region === "NCR (Metro Manila)", `Predictor retains region (${fullPred.region})`);
 
   console.log("\n✅ All NOAH Offline Inundation & Risk Engine Tests Passed Successfully!\n");
 }

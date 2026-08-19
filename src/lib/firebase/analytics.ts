@@ -181,3 +181,13 @@ export function trackTableTabSwitch(
     tab_name: tabName,
   });
 }
+
+/** Track Donation modal and account copy actions */
+export function trackDonationAction(params: {
+  action: "open_modal" | "copy_bpi" | "copy_bdo" | "copy_email" | "view_image";
+}) {
+  logAnalyticsEvent("donation_interaction", {
+    donation_action: params.action,
+  });
+}
+

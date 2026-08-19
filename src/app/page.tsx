@@ -13,6 +13,7 @@ import LocationAutocomplete from "@/components/LocationAutocomplete";
 import StationTable from "@/components/StationTable";
 import NearestStationFinder from "@/components/NearestStationFinder";
 import ShareModal from "@/components/ShareModal";
+import DonationModal from "@/components/DonationModal";
 import {
   fetchAndEvaluateRoute,
   type RouteOption,
@@ -46,6 +47,7 @@ export default function HomePage() {
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [isDonationModalOpen, setIsDonationModalOpen] = useState<boolean>(false);
 
   // Layout Overlay States
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
@@ -92,6 +94,7 @@ export default function HomePage() {
 
   // Filter & Search State for Monitored Roads Table
   const [tableFilterSeverity, setTableFilterSeverity] = useState<string>("ALL");
+  const [tableFilterHighwayClass, setTableFilterHighwayClass] = useState<string>("ALL");
   const [tableSearchQuery, setTableSearchQuery] = useState<string>("");
   const [selectedRoadRisk, setSelectedRoadRisk] = useState<RoadRiskResult | null>(null);
 
@@ -273,6 +276,10 @@ export default function HomePage() {
         hazardScore,
         centroid: [centLat, centLng],
         isNearRiver: minDist <= 0.5,
+        nationalRoute: road.nationalRoute,
+        roadClassification: road.roadClassification,
+        region: road.region,
+        description: road.description,
       };
     });
   }, [activeRoute, activeStations]);
@@ -282,15 +289,32 @@ export default function HomePage() {
     return roadEvaluations.filter((road) => {
       const matchesSeverity =
         tableFilterSeverity === "ALL" || road.severity === tableFilterSeverity;
+
+      let matchesHighwayClass = true;
+      if (tableFilterHighwayClass === "PRIMARY") {
+        matchesHighwayClass = road.roadClassification === "Primary National";
+      } else if (tableFilterHighwayClass === "SECONDARY") {
+        matchesHighwayClass = road.roadClassification === "Secondary National";
+      } else if (tableFilterHighwayClass === "NCR") {
+        matchesHighwayClass = Boolean(road.region && road.region.includes("NCR"));
+      } else if (tableFilterHighwayClass === "PROVINCIAL") {
+        matchesHighwayClass = Boolean(road.region && !road.region.includes("NCR"));
+      }
+
       const query = tableSearchQuery.toLowerCase().trim();
       const matchesQuery =
         !query ||
         road.roadName.toLowerCase().includes(query) ||
+        Boolean(road.nationalRoute && road.nationalRoute.toLowerCase().includes(query)) ||
+        Boolean(road.roadClassification && road.roadClassification.toLowerCase().includes(query)) ||
+        Boolean(road.region && road.region.toLowerCase().includes(query)) ||
+        Boolean(road.description && road.description.toLowerCase().includes(query)) ||
         road.nearestStation.stationName.toLowerCase().includes(query) ||
         road.depthCategory.toLowerCase().includes(query);
-      return matchesSeverity && matchesQuery;
+
+      return matchesSeverity && matchesHighwayClass && matchesQuery;
     });
-  }, [roadEvaluations, tableFilterSeverity, tableSearchQuery]);
+  }, [roadEvaluations, tableFilterSeverity, tableFilterHighwayClass, tableSearchQuery]);
 
   // Fetch OSRM driving or walking route whenever Point A or Point B or telemetry or mode changes
   useEffect(() => {
@@ -480,6 +504,16 @@ export default function HomePage() {
 
         {/* Right: Quick Action Buttons */}
         <div className="pointer-events-auto flex items-center gap-2">
+          {/* Relief & Donation Drive Button */}
+          <button
+            onClick={() => setIsDonationModalOpen(true)}
+            className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white border border-rose-400/40 shadow-xl shadow-rose-950/50 backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
+            title="Official Angat Buhay Flood Relief & Donation Channels"
+          >
+            <span className="text-rose-200">❤️</span>
+            <span className="hidden sm:inline">Donate</span>
+          </button>
+
           {/* Tables & Stations Drawer Button */}
           <button
             onClick={() => {
@@ -1022,6 +1056,17 @@ export default function HomePage() {
             <span className="hidden sm:inline">Nearest Station</span>
             <span className="sm:hidden">Nearest</span>
           </button>
+
+          {/* Angat Buhay Relief Donation Trigger */}
+          <button
+            onClick={() => setIsDonationModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 hover:text-white text-[11px] font-bold transition-all active:scale-95"
+            title="Official Angat Buhay Flood Relief & Donation Channels"
+          >
+            <span>❤️</span>
+            <span className="hidden sm:inline">Relief / Donate</span>
+            <span className="sm:hidden">Donate</span>
+          </button>
         </div>
       </div>
 
@@ -1145,66 +1190,122 @@ export default function HomePage() {
               {/* TAB 2: Monitored Roads Flood Predictions Table */}
               {activeDrawerTab === "road-predictions" && (
                 <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                    {/* Severity Filters */}
-                    <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs overflow-x-auto custom-scrollbar">
+                  {/* Filter Bars */}
+                  <div className="space-y-2.5">
+                    {/* Top Row: Severity Filters & Search */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                      {/* Severity Filters */}
+                      <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs overflow-x-auto custom-scrollbar">
+                        <button
+                          onClick={() => setTableFilterSeverity("ALL")}
+                          className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "ALL"
+                            ? "bg-cyan-600 text-white shadow-md"
+                            : "text-slate-400 hover:text-slate-200"
+                            }`}
+                        >
+                          All Severity ({roadEvaluations.length})
+                        </button>
+                        <button
+                          onClick={() => setTableFilterSeverity("CRITICAL")}
+                          className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "CRITICAL"
+                            ? "bg-rose-600 text-white shadow-md"
+                            : "text-slate-400 hover:text-rose-400"
+                            }`}
+                        >
+                          Critical
+                        </button>
+                        <button
+                          onClick={() => setTableFilterSeverity("ALARM")}
+                          className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "ALARM"
+                            ? "bg-orange-600 text-white shadow-md"
+                            : "text-slate-400 hover:text-orange-400"
+                            }`}
+                        >
+                          Alarm
+                        </button>
+                        <button
+                          onClick={() => setTableFilterSeverity("ALERT")}
+                          className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "ALERT"
+                            ? "bg-amber-600 text-white shadow-md"
+                            : "text-slate-400 hover:text-amber-400"
+                            }`}
+                        >
+                          Alert
+                        </button>
+                        <button
+                          onClick={() => setTableFilterSeverity("NORMAL")}
+                          className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "NORMAL"
+                            ? "bg-emerald-600 text-white shadow-md"
+                            : "text-slate-400 hover:text-emerald-400"
+                            }`}
+                        >
+                          Normal
+                        </button>
+                      </div>
+
+                      {/* Search Input */}
+                      <div className="relative w-full sm:w-72">
+                        <input
+                          type="text"
+                          value={tableSearchQuery}
+                          onChange={(e) => setTableSearchQuery(e.target.value)}
+                          placeholder="Filter route (e.g. N1, N170, MacArthur)..."
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-1.5 focus:outline-none focus:border-cyan-500 font-medium"
+                        />
+                        <span className="absolute left-2.5 top-2 text-slate-500 text-xs">🔍</span>
+                      </div>
+                    </div>
+
+                    {/* Bottom Row: Philippine Highway Network Classification Filters */}
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-950/70 border border-slate-800/80 rounded-xl text-xs overflow-x-auto custom-scrollbar">
+                      <span className="text-[10px] font-bold text-cyan-400 px-2 py-0.5 whitespace-nowrap flex items-center gap-1">
+                        <span>🇵🇭</span> DPWH Routes:
+                      </span>
                       <button
-                        onClick={() => setTableFilterSeverity("ALL")}
-                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "ALL"
-                          ? "bg-cyan-600 text-white shadow-md"
+                        onClick={() => setTableFilterHighwayClass("ALL")}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap ${tableFilterHighwayClass === "ALL"
+                          ? "bg-blue-600 text-white shadow-md font-bold"
                           : "text-slate-400 hover:text-slate-200"
                           }`}
                       >
-                        All ({roadEvaluations.length})
+                        All Corridors ({roadEvaluations.length})
                       </button>
                       <button
-                        onClick={() => setTableFilterSeverity("CRITICAL")}
-                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "CRITICAL"
-                          ? "bg-rose-600 text-white shadow-md"
-                          : "text-slate-400 hover:text-rose-400"
+                        onClick={() => setTableFilterHighwayClass("PRIMARY")}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap flex items-center gap-1 ${tableFilterHighwayClass === "PRIMARY"
+                          ? "bg-blue-600 text-white shadow-md font-bold"
+                          : "text-slate-400 hover:text-blue-300"
                           }`}
                       >
-                        Critical
+                        <span>🛡️</span> Primary National (N1–N11)
                       </button>
                       <button
-                        onClick={() => setTableFilterSeverity("ALARM")}
-                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "ALARM"
-                          ? "bg-orange-600 text-white shadow-md"
-                          : "text-slate-400 hover:text-orange-400"
+                        onClick={() => setTableFilterHighwayClass("SECONDARY")}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap flex items-center gap-1 ${tableFilterHighwayClass === "SECONDARY"
+                          ? "bg-blue-600 text-white shadow-md font-bold"
+                          : "text-slate-400 hover:text-blue-300"
                           }`}
                       >
-                        Alarm
+                        <span>🛣️</span> Secondary National (N120–N401)
                       </button>
                       <button
-                        onClick={() => setTableFilterSeverity("ALERT")}
-                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "ALERT"
-                          ? "bg-amber-600 text-white shadow-md"
-                          : "text-slate-400 hover:text-amber-400"
+                        onClick={() => setTableFilterHighwayClass("NCR")}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap flex items-center gap-1 ${tableFilterHighwayClass === "NCR"
+                          ? "bg-blue-600 text-white shadow-md font-bold"
+                          : "text-slate-400 hover:text-blue-300"
                           }`}
                       >
-                        Alert
+                        <span>🏙️</span> Metro Manila (NCR)
                       </button>
                       <button
-                        onClick={() => setTableFilterSeverity("NORMAL")}
-                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap ${tableFilterSeverity === "NORMAL"
-                          ? "bg-emerald-600 text-white shadow-md"
-                          : "text-slate-400 hover:text-emerald-400"
+                        onClick={() => setTableFilterHighwayClass("PROVINCIAL")}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap flex items-center gap-1 ${tableFilterHighwayClass === "PROVINCIAL"
+                          ? "bg-blue-600 text-white shadow-md font-bold"
+                          : "text-slate-400 hover:text-blue-300"
                           }`}
                       >
-                        Normal
+                        <span>📍</span> Provincial Arterials
                       </button>
-                    </div>
-
-                    {/* Search Input */}
-                    <div className="relative w-full sm:w-64">
-                      <input
-                        type="text"
-                        value={tableSearchQuery}
-                        onChange={(e) => setTableSearchQuery(e.target.value)}
-                        placeholder="Filter road or station..."
-                        className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-1.5 focus:outline-none focus:border-cyan-500 font-medium"
-                      />
-                      <span className="absolute left-2.5 top-2 text-slate-500 text-xs">🔍</span>
                     </div>
                   </div>
 
@@ -1221,7 +1322,19 @@ export default function HomePage() {
                             }`}
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {road.nationalRoute && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-950/90 border border-blue-400/40 text-[10px] font-extrabold text-blue-300 tracking-wider shadow-sm font-mono">
+                                    <span>🛣️</span> {road.nationalRoute}
+                                  </span>
+                                )}
+                                {road.region && (
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    • {road.region}
+                                  </span>
+                                )}
+                              </div>
                               <strong className="text-white text-xs block font-bold">{road.roadName}</strong>
                               <span className="text-[10px] text-slate-500 font-mono">
                                 Elev: {road.elevationMeters.toFixed(1)}m EL.m
@@ -1301,7 +1414,7 @@ export default function HomePage() {
                     <table className="w-full text-left text-xs text-slate-300">
                       <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-mono text-[10px] border-b border-slate-800">
                         <tr>
-                          <th className="px-4 py-3 font-semibold">Road Segment / Corridor</th>
+                          <th className="px-4 py-3 font-semibold">Highway Corridor / Route</th>
                           <th className="px-4 py-3 font-semibold">Severity Status</th>
                           <th className="px-4 py-3 font-semibold">Predicted Depth</th>
                           <th className="px-4 py-3 font-semibold">Hazard Score</th>
@@ -1321,10 +1434,23 @@ export default function HomePage() {
                                 }`}
                             >
                               <td className="px-4 py-3">
+                                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                  {road.nationalRoute && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-950/90 border border-blue-400/40 text-[10px] font-extrabold text-blue-300 tracking-wider shadow-sm font-mono">
+                                      <span>🛣️</span> {road.nationalRoute}
+                                    </span>
+                                  )}
+                                  {road.roadClassification && (
+                                    <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                                      {road.roadClassification}
+                                    </span>
+                                  )}
+                                </div>
                                 <strong className="text-slate-100 block font-bold text-xs">{road.roadName}</strong>
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  Elev: {road.elevationMeters.toFixed(1)}m EL.m
-                                </span>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono mt-0.5">
+                                  <span>Elev: {road.elevationMeters.toFixed(1)}m EL.m</span>
+                                  {road.region && <span>• {road.region}</span>}
+                                </div>
                               </td>
 
                               <td className="px-4 py-3">
@@ -1431,6 +1557,12 @@ export default function HomePage() {
         activeRoute={activeRoute}
         metrics={metrics}
         selectedRoad={selectedRoadRisk}
+      />
+
+      {/* ── 8. ANGAT BUHAY RELIEF & DONATIONS MODAL ───────────────────── */}
+      <DonationModal
+        isOpen={isDonationModalOpen}
+        onClose={() => setIsDonationModalOpen(false)}
       />
     </div>
   );

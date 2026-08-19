@@ -42,6 +42,14 @@ export interface RoadRiskResult {
   centroid: [number, number];
   /** Whether this road is within a riverbank overflow zone (~500m of a river gauge) */
   isNearRiver: boolean;
+  /** Official DPWH Route Number (e.g. "N1 / AH26", "N170", "N2", "N11") */
+  nationalRoute?: string;
+  /** DPWH Highway classification */
+  roadClassification?: string;
+  /** Administrative region (e.g. "NCR (Metro Manila)", "Region III (Central Luzon)") */
+  region?: string;
+  /** Detailed description or corridor notes */
+  description?: string;
 }
 
 export interface GeoJSONLineStringFeature {
@@ -216,7 +224,15 @@ export function calculateRoadRisk(
 
   // 2. Find Nearest PAGASA Telemetry Station
   if (!stations || stations.length === 0) {
-    return createFallbackRiskResult(roadName, roadElevation, centroid);
+    return createFallbackRiskResult(
+      roadName,
+      roadElevation,
+      centroid,
+      roadFeature.properties?.nationalRoute,
+      roadFeature.properties?.roadClassification,
+      roadFeature.properties?.region,
+      roadFeature.properties?.description
+    );
   }
 
   let nearestStation: LiveStation = stations[0];
@@ -318,6 +334,10 @@ export function calculateRoadRisk(
     hazardScore,
     centroid,
     isNearRiver,
+    nationalRoute: roadFeature.properties?.nationalRoute,
+    roadClassification: roadFeature.properties?.roadClassification,
+    region: roadFeature.properties?.region,
+    description: roadFeature.properties?.description,
   };
 }
 
@@ -375,7 +395,11 @@ function getDrivableVehicles(depthCm: number): string[] {
 function createFallbackRiskResult(
   roadName: string,
   roadElevation: number,
-  centroid: [number, number]
+  centroid: [number, number],
+  nationalRoute?: string,
+  roadClassification?: string,
+  region?: string,
+  description?: string
 ): RoadRiskResult {
   return {
     roadName,
@@ -397,5 +421,9 @@ function createFallbackRiskResult(
     hazardScore: 0,
     centroid,
     isNearRiver: false,
+    nationalRoute,
+    roadClassification,
+    region,
+    description,
   };
 }

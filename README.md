@@ -49,7 +49,7 @@
 ### 🎨 Dark-Themed Interactive Map & Visuals
 - **Leaflet.js + CartoDB Dark Matter**: High-performance dark canvas with pulsating station indicators and responsive/collapsible mobile flood legends.
 - **Continuous Route Overlay**: Displays base driving/walking polyline with high-contrast highlighted overlays on flooded segments.
-- **Monitored Road Corridors**: Pre-configured layers for key flood-prone arteries (España Blvd, G. Araneta Ave, Taft Ave, EDSA Shaw, Katipunan Ave, Marikina Riverbanks, Maysilo Circle) with radar focus beacons.
+- **Philippine Highway Network (DPWH National Roads)**: Comprehensive monitoring of Primary & Secondary National Highways (e.g. **N1 / AH26** Maharlika Highway, **N2** MacArthur Highway, **N3** Jose Abad Santos Ave, **N4** Pres. Jose P. Laurel Hwy, **N11** C-5 Road, **N120** Roxas Blvd, **N130** Quirino/Araneta, **N170** España/Quezon/Commonwealth Ave, **N180** Taft/Rizal Ave, **N190** Gil Puyat Ave, **N201** Marcos Hwy, **N5** Iloilo-Capiz, **N8** Cebu North/South, **N9** Butuan-CDO-Iligan) with DPWH route shields and radar focus beacons.
 - **Autocomplete & Proximity Finder**: OpenStreetMap Nominatim place search coupled with Geohash bounding-box queries (`geofire-common`) and Haversine distance calculations.
 
 ### 📸 High-Resolution Social Share Engine
@@ -235,7 +235,7 @@ bahaba/
 │   │   └── useLiveFloodStatus.ts       # Firestore onSnapshot listener with offline fallback
 │   ├── lib/
 │   │   ├── data/
-│   │   │   └── noah-roads.json         # GeoJSON dataset of flood-prone Metro Manila roads
+│   │   │   └── noah-roads.json         # GeoJSON dataset of Philippine National Highways & urban flood corridors
 │   │   ├── engine/
 │   │   │   ├── __tests__/              # Automated test suites
 │   │   │   │   ├── flood-engine.test.ts

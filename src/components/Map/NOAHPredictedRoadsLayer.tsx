@@ -203,11 +203,16 @@ export default function NOAHPredictedRoadsLayer({
                 ? "Low (5-Yr Return)"
                 : "None / Safe";
 
+            const routeShield = pred.nationalRoute
+              ? `<div style="margin-bottom: 4px;"><span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; background-color: #1e3a8a; border: 1px solid #60a5fa; color: #bfdbfe; font-size: 9.5px; font-weight: 800; font-family: monospace;">🛣️ ${pred.nationalRoute}</span></div>`
+              : "";
+
             // Construct interactive Leaflet Popup displaying required metadata
             const popupHtml = `
-              <div style="font-family: system-ui, -apple-system, sans-serif; padding: 6px; color: #0f172a; min-width: 220px; max-width: 280px;">
-                <div style="display: flex; items-center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
-                  <h3 style="font-size: 14px; font-weight: 700; margin: 0; color: #0f172a;">
+              <div style="font-family: system-ui, -apple-system, sans-serif; padding: 6px; color: #0f172a; min-width: 230px; max-width: 290px;">
+                ${routeShield}
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                  <h3 style="font-size: 13.5px; font-weight: 700; margin: 0; color: #0f172a;">
                     ${pred.roadName}
                   </h3>
                   <span style="

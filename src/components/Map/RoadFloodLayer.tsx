@@ -170,22 +170,38 @@ export default function RoadFloodLayer({
             noClip: true,
           });
 
-          // 3. Interactive Popup Construction
           const severityBg = risk.color;
           const floodModeLabel = risk.isNearRiver ? "🏞️ Riverbank Zone" : "🏙️ Urban Surface";
           const floodModeColor = risk.isNearRiver ? "#3b82f6" : "#6b7280";
 
+          const routeShieldBadge = risk.nationalRoute
+            ? `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; background-color: #1e3a8a; border: 1px solid #60a5fa; color: #bfdbfe; font-size: 9.5px; font-weight: 800; font-family: monospace; letter-spacing: 0.05em;">🛣️ ${risk.nationalRoute}</span>`
+            : "";
+
+          const regionBadge = risk.region
+            ? `<span style="font-size: 9.5px; color: #64748b; font-weight: 600;">📍 ${risk.region}</span>`
+            : "";
+
+          const classificationBadge = risk.roadClassification
+            ? `<span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; font-weight: 600;">${risk.roadClassification}</span>`
+            : "";
+
           const popupHtml = `
-            <div style="font-family: system-ui, -apple-system, sans-serif; padding: 6px; color: #0f172a; min-width: 240px; max-width: 300px;">
+            <div style="font-family: system-ui, -apple-system, sans-serif; padding: 6px; color: #0f172a; min-width: 250px; max-width: 310px;">
               <!-- Header -->
-              <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
+              <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                 <div>
-                  <h3 style="font-size: 14px; font-weight: 700; margin: 0; color: #0f172a; line-height: 1.3;">
+                  <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 3px;">
+                    ${routeShieldBadge}
+                    ${classificationBadge}
+                  </div>
+                  <h3 style="font-size: 13.5px; font-weight: 700; margin: 0; color: #0f172a; line-height: 1.3;">
                     ${risk.roadName}
                   </h3>
-                  <p style="font-size: 11px; color: #64748b; margin: 2px 0 0 0;">
-                    Elevation: ${risk.elevationMeters.toFixed(1)}m EL.m
-                  </p>
+                  <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #64748b; margin-top: 2px;">
+                    <span>Elev: ${risk.elevationMeters.toFixed(1)}m EL.m</span>
+                    ${regionBadge}
+                  </div>
                 </div>
                 <span style="
                   font-size: 10px;

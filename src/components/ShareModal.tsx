@@ -261,7 +261,11 @@ export default function ShareModal({
         lines.push(`⚠️ *Advisories:* ${activeRoute.warnings.join("; ")}`);
       }
     } else if (selectedRoad) {
-      lines.push(`🛣️ *Road Corridor:* ${selectedRoad.roadName}`);
+      const routePrefix = selectedRoad.nationalRoute ? `[${selectedRoad.nationalRoute}] ` : "";
+      lines.push(`🛣️ *Road Corridor:* ${routePrefix}${selectedRoad.roadName}`);
+      if (selectedRoad.roadClassification) {
+        lines.push(`🇵🇭 *DPWH Class:* ${selectedRoad.roadClassification}${selectedRoad.region ? ` (${selectedRoad.region})` : ""}`);
+      }
       lines.push(`🚨 *Risk Level:* ${selectedRoad.severity} (${selectedRoad.estimatedDepthCm} cm depth)`);
       lines.push(`📊 *Nearest Station:* ${selectedRoad.nearestStation.stationName} (${selectedRoad.nearestStation.waterLevel}m level)`);
       lines.push(`🚗 *Passable Vehicles:* ${passableVehicles.join(", ")}`);
@@ -737,8 +741,13 @@ function StoryCardContent({
           </div>
         ) : selectedRoad ? (
           <div className="bg-[#060b17]/95 border border-slate-800/90 rounded-2xl p-3 space-y-1 shadow-sm">
-            <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
-              Monitored Road Corridor
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                {selectedRoad.nationalRoute ? `🛣️ DPWH Route ${selectedRoad.nationalRoute}` : "Monitored Road Corridor"}
+              </div>
+              {selectedRoad.region && (
+                <span className="text-[9.5px] text-slate-400 font-medium">📍 {selectedRoad.region}</span>
+              )}
             </div>
             <strong className="text-sm font-bold text-white block truncate">
               {selectedRoad.roadName}
@@ -938,7 +947,14 @@ function FeedCardContent({
         </div>
       ) : selectedRoad ? (
         <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
-          <div className="text-[10px] font-bold text-cyan-400 uppercase">Monitored Road Corridor</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] font-bold text-cyan-400 uppercase">
+              {selectedRoad.nationalRoute ? `🛣️ DPWH Route ${selectedRoad.nationalRoute}` : "Monitored Road Corridor"}
+            </div>
+            {selectedRoad.region && (
+              <span className="text-[9.5px] text-slate-400 font-medium">📍 {selectedRoad.region}</span>
+            )}
+          </div>
           <div className="text-sm font-bold text-white truncate">{selectedRoad.roadName}</div>
           <div className="text-[10px] text-slate-400 font-mono">
             Elevation: {selectedRoad.elevationMeters.toFixed(1)}m | Station: {selectedRoad.nearestStation.stationName}
