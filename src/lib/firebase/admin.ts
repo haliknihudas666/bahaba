@@ -51,6 +51,11 @@ try {
   }
 
   adminDb = getFirestore(app);
+  try {
+    adminDb.settings({ ignoreUndefinedProperties: true });
+  } catch {
+    // ignore if already configured
+  }
 } catch {
   console.warn("[Firebase Admin] firebase-admin package not found in node_modules.");
 }

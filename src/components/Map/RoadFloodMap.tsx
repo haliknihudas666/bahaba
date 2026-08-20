@@ -9,8 +9,10 @@ import type { LiveStation } from "@/types";
 import PMTilesFloodRoadsLayer from "./PMTilesFloodRoadsLayer";
 import NOAHFloodHazardLayer from "./NOAHFloodHazardLayer";
 import FloodHeatmapLayer from "./FloodHeatmapLayer";
+import LiveAdvisoryOverlayLayer from "./LiveAdvisoryOverlayLayer";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
 import type { RouteSegmentData, TravelMode } from "@/lib/engine/routeSolver";
+import type { ReportedAdvisory } from "@/types/advisory";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface RoadFloodMapProps {
@@ -18,6 +20,12 @@ interface RoadFloodMapProps {
   stations: LiveStation[];
   /** Selected station ID for focus */
   selectedStationId?: string | null;
+  /** Active reported road flood advisories */
+  advisories?: ReportedAdvisory[];
+  /** Selected advisory for focus */
+  selectedAdvisory?: ReportedAdvisory | null;
+  /** Advisory selection callback */
+  onSelectAdvisory?: (advisory: ReportedAdvisory) => void;
   /** Selected road risk metadata for focus & highlight */
   selectedRoad?: RoadRiskResult | null;
   /** Selected road risk metadata callback */
@@ -45,6 +53,9 @@ interface RoadFloodMapProps {
 export default function RoadFloodMap({
   stations,
   selectedStationId,
+  advisories = [],
+  selectedAdvisory = null,
+  onSelectAdvisory,
   selectedRoad,
   onSelectRoad,
   fullRoutePolyline = [],
@@ -552,6 +563,13 @@ export default function RoadFloodMap({
             map={leafletMapRef.current}
             visible={true}
             stations={stations}
+          />
+          <LiveAdvisoryOverlayLayer
+            map={leafletMapRef.current}
+            mapLoaded={mapLoaded}
+            advisories={advisories}
+            selectedAdvisory={selectedAdvisory}
+            onSelectAdvisory={onSelectAdvisory}
           />
         </>
       )}

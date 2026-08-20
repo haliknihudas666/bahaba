@@ -21,6 +21,8 @@ interface MapHeaderControlsProps {
   onOpenDonationModal: () => void;
   onOpenShareModal: () => void;
   onOpenDrawer: () => void;
+  onOpenAdvisoryModal: () => void;
+  activeAdvisoryCount?: number;
 }
 
 export default function MapHeaderControls({
@@ -31,6 +33,8 @@ export default function MapHeaderControls({
   onOpenDonationModal,
   onOpenShareModal,
   onOpenDrawer,
+  onOpenAdvisoryModal,
+  activeAdvisoryCount = 0,
 }: MapHeaderControlsProps) {
   return (
     <header className="absolute top-2.5 left-2.5 right-2.5 sm:top-4 sm:left-4 sm:right-4 z-[500] pointer-events-none flex items-center justify-between gap-1.5 sm:gap-4">
@@ -129,6 +133,21 @@ export default function MapHeaderControls({
 
       {/* Right: Quick Action Buttons */}
       <div className="pointer-events-auto flex items-center gap-1 sm:gap-2">
+        {/* Official Advisory Wall Button */}
+        <button
+          onClick={onOpenAdvisoryModal}
+          className="flex items-center gap-1.5 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-amber-500/40 hover:border-amber-500/70 shadow-xl backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
+          title="Open MMDA & NDRRMC Live Official Advisory Wall"
+        >
+          <span className="text-xs">📢</span>
+          <span className="hidden sm:inline">Advisories</span>
+          {activeAdvisoryCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-extrabold shadow-sm animate-pulse">
+              {activeAdvisoryCount}
+            </span>
+          )}
+        </button>
+
         {/* Relief & Donation Drive Button */}
         <button
           onClick={onOpenDonationModal}

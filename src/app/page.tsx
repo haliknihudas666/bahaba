@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useLiveFloodStatus } from "@/hooks/useLiveFloodStatus";
+import { useLiveAdvisories } from "@/hooks/useLiveAdvisories";
 import RoadFloodMap from "@/components/Map/RoadFloodMap";
 import RoutePlanner, { type LocationItemState } from "@/components/Navigation/RoutePlanner";
 import BottomDrawer, { type DrawerTabType } from "@/components/Drawer/BottomDrawer";
@@ -14,6 +15,7 @@ import MapHeaderControls from "@/components/Layout/MapHeaderControls";
 import MapLegend from "@/components/Layout/MapLegend";
 import ShareModal from "@/components/ShareModal";
 import DonationModal from "@/components/DonationModal";
+import AdvisoryWallModal from "@/components/Advisory/AdvisoryWallModal";
 import {
   fetchAndEvaluateRoute,
   type RouteOption,
@@ -40,12 +42,23 @@ export default function HomePage() {
     refreshScraper,
   } = useLiveFloodStatus();
 
+  const {
+    advisories,
+    activeFloodCount,
+    isLoading: isLoadingAdvisories,
+    isRefreshing: isRefreshingAdvisories,
+    selectedAdvisory,
+    setSelectedAdvisory,
+    refreshAdvisories,
+  } = useLiveAdvisories();
+
   // Layout & Modal Overlay States
   const [syncing, setSyncing] = useState<boolean>(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isDonationModalOpen, setIsDonationModalOpen] = useState<boolean>(false);
+  const [isAdvisoryModalOpen, setIsAdvisoryModalOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [recenterTrigger, setRecenterTrigger] = useState<number>(0);
@@ -352,6 +365,9 @@ export default function HomePage() {
         <RoadFloodMap
           stations={activeStations}
           selectedStationId={selectedStationId}
+          advisories={advisories}
+          selectedAdvisory={selectedAdvisory}
+          onSelectAdvisory={(advisory) => setSelectedAdvisory(advisory)}
           selectedRoad={selectedRoadRisk}
           originCoords={originLoc.coords}
           destinationCoords={destLoc.coords}
@@ -373,6 +389,8 @@ export default function HomePage() {
         onSync={triggerTelemetrySync}
         onOpenDonationModal={() => setIsDonationModalOpen(true)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
+        onOpenAdvisoryModal={() => setIsAdvisoryModalOpen(true)}
+        activeAdvisoryCount={activeFloodCount}
         onOpenDrawer={() => {
           setIsDrawerOpen(true);
           trackTableTabSwitch(activeDrawerTab);
@@ -475,6 +493,20 @@ export default function HomePage() {
       <DonationModal
         isOpen={isDonationModalOpen}
         onClose={() => setIsDonationModalOpen(false)}
+      />
+
+      {/* ── 9. OFFICIAL MMDA & NDRRMC ADVISORY WALL MODAL ─────────────── */}
+      <AdvisoryWallModal
+        isOpen={isAdvisoryModalOpen}
+        onClose={() => setIsAdvisoryModalOpen(false)}
+        advisories={advisories}
+        activeFloodCount={activeFloodCount}
+        isLoading={isLoadingAdvisories}
+        isRefreshing={isRefreshingAdvisories}
+        onRefresh={refreshAdvisories}
+        onSelectAdvisory={(advisory) => {
+          setSelectedAdvisory(advisory);
+        }}
       />
     </div>
   );
