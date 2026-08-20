@@ -21,12 +21,16 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as protomapsL from "protomaps-leaflet";
+import { createCachedPMTiles } from "@/lib/pmtiles/cachedSource";
 import type { LiveStation } from "@/types";
-import { estimateInundationAtLocation } from "@/lib/engine/liveFloodGrid";
+import { estimateInundationAtLocation, type SpatialInundationEstimate } from "@/lib/engine/liveFloodGrid";
 
 /** Philippines Vector Road Network PMTiles hosted on Hugging Face */
 const PH_ROADS_PMTILES_URL =
   "https://huggingface.co/datasets/Jrabb1t/philippines-map-data/resolve/main/philippines-final.pmtiles";
+
+// Module-level persistent PMTiles instance with IndexedDB and RAM chunk caching
+const roadsPMTilesSource = createCachedPMTiles(PH_ROADS_PMTILES_URL);
 
 interface GeoBBox {
   minLat: number;
@@ -52,6 +56,10 @@ function tile2bbox(x: number, y: number, z: number): GeoBBox {
   };
 }
 
+// Global active tile flood state during synchronous canvas painting
+let activePaintDepthCm = 0;
+let activePaintCategory = "NORMAL";
+
 interface PMTilesFloodRoadsLayerProps {
   /** Leaflet map instance */
   map: any;
@@ -73,7 +81,11 @@ export default function PMTilesFloodRoadsLayer({
   const [rain24h, setRain24h] = useState<number>(0);
   const rainRateRef = useRef<number>(0);
   const rain24hRef = useRef<number>(0);
-  const lastFetchedCenterRef = useRef<string>("");
+  const lastFetchedCenterRef = useRef<{ lat: number; lng: number; time: number }>({
+    lat: 0,
+    lng: 0,
+    time: 0,
+  });
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -82,7 +94,7 @@ export default function PMTilesFloodRoadsLayer({
     };
   }, []);
 
-  // Keep live stations in ref
+  // Update stations ref and redraw only if station count or high-risk count changed
   useEffect(() => {
     stationsRef.current = stations;
     if (layerRef.current && typeof layerRef.current.redraw === "function") {
@@ -99,11 +111,15 @@ export default function PMTilesFloodRoadsLayer({
     }
   }, [rainRate, rain24h]);
 
-  // 1. Fetch live Open-Meteo rainfall for current map center
+  // 1. Fetch live Open-Meteo rainfall for current map center (debounced & distance-throttled)
   const fetchOpenMeteoRainfall = useCallback(async (lat: number, lng: number) => {
-    const centerKey = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-    if (lastFetchedCenterRef.current === centerKey) return;
-    lastFetchedCenterRef.current = centerKey;
+    const now = Date.now();
+    const last = lastFetchedCenterRef.current;
+    const distMoved = Math.hypot(lat - last.lat, lng - last.lng);
+
+    // Only query API if map moved > ~5km (0.045 deg) or > 60 seconds elapsed
+    if (distMoved < 0.045 && now - last.time < 60000) return;
+    lastFetchedCenterRef.current = { lat, lng, time: now };
 
     try {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=precipitation,rain&hourly=precipitation`;
@@ -128,23 +144,28 @@ export default function PMTilesFloodRoadsLayer({
     }
   }, []);
 
-  // Update rainfall on map pan / zoom
+  // Update rainfall on map move (debounced)
   useEffect(() => {
     if (!map || !map._loaded) return;
 
+    let timeoutId: NodeJS.Timeout | null = null;
     const handleViewChange = () => {
-      try {
-        const center = map.getCenter();
-        if (center && typeof center.lat === "number" && typeof center.lng === "number") {
-          fetchOpenMeteoRainfall(center.lat, center.lng);
-        }
-      } catch {}
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        try {
+          const center = map.getCenter();
+          if (center && typeof center.lat === "number" && typeof center.lng === "number") {
+            fetchOpenMeteoRainfall(center.lat, center.lng);
+          }
+        } catch {}
+      }, 500);
     };
 
     handleViewChange();
     map.on("moveend", handleViewChange);
 
     return () => {
+      if (timeoutId) clearTimeout(timeoutId);
       try {
         map.off("moveend", handleViewChange);
       } catch {}
@@ -157,114 +178,117 @@ export default function PMTilesFloodRoadsLayer({
 
     if (!layerRef.current) {
       try {
+        const roadSymbolizer = new protomapsL.LineSymbolizer({
+          color: (_z: number, f: any) => {
+            const cls = f?.props?.class;
+            const floodDepthCm = activePaintDepthCm;
+            const floodCategory = activePaintCategory;
+
+            // ── FLOODED ROAD STYLING (Standing water >= 6cm) ──
+            if (floodDepthCm >= 6) {
+              if (floodCategory === "CRITICAL" || floodDepthCm > 30) {
+                // Waist Deep (> 30 cm) / Impassable
+                if (cls === "motorway" || cls === "trunk") return "rgba(220, 38, 38, 0.98)";
+                if (cls === "primary") return "rgba(185, 28, 28, 0.98)";
+                if (cls === "secondary") return "rgba(153, 27, 27, 0.95)";
+                if (cls === "tertiary") return "rgba(127, 29, 29, 0.90)";
+                return "rgba(185, 28, 28, 0.85)";
+              }
+
+              if (floodCategory === "HIGH" || floodDepthCm >= 16) {
+                // Half-Tire Deep (16–30 cm)
+                if (cls === "motorway" || cls === "trunk") return "rgba(249, 115, 22, 0.98)";
+                if (cls === "primary") return "rgba(239, 68, 68, 0.98)";
+                if (cls === "secondary") return "rgba(220, 38, 38, 0.95)";
+                if (cls === "tertiary") return "rgba(234, 88, 12, 0.90)";
+                return "rgba(249, 115, 22, 0.80)";
+              }
+
+              // Gutter Deep (6–15 cm)
+              if (cls === "motorway" || cls === "trunk") return "rgba(56, 189, 248, 0.95)";
+              if (cls === "primary") return "rgba(249, 115, 22, 0.98)";
+              if (cls === "secondary") return "rgba(251, 146, 60, 0.95)";
+              if (cls === "tertiary") return "rgba(253, 186, 116, 0.90)";
+              return "rgba(251, 146, 60, 0.75)";
+            }
+
+            // ── CLEAR / DRY ROADS (Sleek Dark Mode Cyan / Slate Palette) ──
+            if (cls === "motorway" || cls === "trunk") return "rgba(56, 189, 248, 0.95)";
+            if (cls === "primary") return "rgba(96, 165, 250, 0.90)";
+            if (cls === "secondary") return "rgba(147, 197, 253, 0.80)";
+            if (cls === "tertiary") return "rgba(148, 163, 184, 0.65)";
+            return "rgba(100, 116, 139, 0.45)";
+          },
+          width: (z: number, f: any) => {
+            const cls = f?.props?.class;
+            const isFlooded = activePaintDepthCm >= 6;
+            const boost = isFlooded ? 2.0 : 0;
+
+            if (cls === "motorway" || cls === "trunk") {
+              return (z >= 14 ? 5.5 : z >= 12 ? 4 : 2.5) + boost;
+            }
+            if (cls === "primary") {
+              return (z >= 14 ? 4.5 : z >= 12 ? 3 : 2) + boost;
+            }
+            if (cls === "secondary") {
+              return (z >= 14 ? 3.5 : z >= 12 ? 2.2 : 1.5) + boost;
+            }
+            if (cls === "tertiary") {
+              return (z >= 14 ? 2.5 : z >= 12 ? 1.6 : 1) + boost;
+            }
+            return (z >= 14 ? 1.8 : z >= 13 ? 1.0 : 0) + (isFlooded && z >= 13 ? 1.5 : 0);
+          },
+          opacity: 0.92,
+        });
+
+        // Hook into LineSymbolizer.before to read precalculated tile flood status from canvas
+        const origBefore = roadSymbolizer.before.bind(roadSymbolizer);
+        roadSymbolizer.before = function (ctx: CanvasRenderingContext2D, z: number) {
+          const est = (ctx.canvas as any)?._tileFloodEstimate as SpatialInundationEstimate | undefined;
+          if (est) {
+            activePaintDepthCm = est.estimatedDepthCm;
+            activePaintCategory = est.riskCategory;
+          } else {
+            activePaintDepthCm = 0;
+            activePaintCategory = "NORMAL";
+          }
+          return origBefore(ctx, z);
+        };
+
         const layer = protomapsL.leafletLayer({
-          url: PH_ROADS_PMTILES_URL,
+          url: roadsPMTilesSource as any,
           paintRules: [
-            // Physical Road Vectors with Live Flood Engine Inundation Styling
+            // Physical Road Vectors with Zoom Filtering & Live Flood Engine Inundation Styling
             {
               dataLayer: "transportation",
-              symbolizer: new protomapsL.LineSymbolizer({
-                color: (_z: number, f: any) => {
-                  const cls = f?.props?.class;
-                  const bbox = (layer as any)._currentTileBBox as GeoBBox | undefined;
-
-                  let floodDepthCm = 0;
-                  let floodCategory = "NORMAL";
-
-                  if (bbox) {
-                    const centLat = (bbox.minLat + bbox.maxLat) / 2;
-                    const centLng = (bbox.minLng + bbox.maxLng) / 2;
-
-                    // Run offline & live hydro-prediction model for this tile
-                    const estimate = estimateInundationAtLocation(
-                      centLat,
-                      centLng,
-                      stationsRef.current,
-                      rainRateRef.current,
-                      rain24hRef.current
-                    );
-
-                    floodDepthCm = estimate.estimatedDepthCm;
-                    floodCategory = estimate.riskCategory;
-                  }
-
-                  // ── FLOODED ROAD STYLING (Standing water >= 6cm) ──
-                  if (floodDepthCm >= 6) {
-                    if (floodCategory === "CRITICAL" || floodDepthCm > 30) {
-                      // Waist Deep (> 30 cm) / Impassable
-                      if (cls === "motorway" || cls === "trunk") return "rgba(220, 38, 38, 0.98)";
-                      if (cls === "primary") return "rgba(185, 28, 28, 0.98)";
-                      if (cls === "secondary") return "rgba(153, 27, 27, 0.95)";
-                      if (cls === "tertiary") return "rgba(127, 29, 29, 0.90)";
-                      return "rgba(185, 28, 28, 0.85)";
-                    }
-
-                    if (floodCategory === "HIGH" || floodDepthCm >= 16) {
-                      // Half-Tire Deep (16–30 cm)
-                      if (cls === "motorway" || cls === "trunk") return "rgba(249, 115, 22, 0.98)";
-                      if (cls === "primary") return "rgba(239, 68, 68, 0.98)";
-                      if (cls === "secondary") return "rgba(220, 38, 38, 0.95)";
-                      if (cls === "tertiary") return "rgba(234, 88, 12, 0.90)";
-                      return "rgba(249, 115, 22, 0.80)";
-                    }
-
-                    // Gutter Deep (6–15 cm)
-                    if (cls === "motorway" || cls === "trunk") return "rgba(56, 189, 248, 0.95)";
-                    if (cls === "primary") return "rgba(249, 115, 22, 0.98)";
-                    if (cls === "secondary") return "rgba(251, 146, 60, 0.95)";
-                    if (cls === "tertiary") return "rgba(253, 186, 116, 0.90)";
-                    return "rgba(251, 146, 60, 0.75)";
-                  }
-
-                  // ── CLEAR / DRY ROADS (Sleek Dark Mode Cyan / Slate Palette) ──
-                  if (cls === "motorway" || cls === "trunk") return "rgba(56, 189, 248, 0.95)";
-                  if (cls === "primary") return "rgba(96, 165, 250, 0.90)";
-                  if (cls === "secondary") return "rgba(147, 197, 253, 0.80)";
-                  if (cls === "tertiary") return "rgba(148, 163, 184, 0.65)";
-                  return "rgba(100, 116, 139, 0.45)";
-                },
-                width: (z: number, f: any) => {
-                  const cls = f?.props?.class;
-                  const bbox = (layer as any)._currentTileBBox as GeoBBox | undefined;
-
-                  let isFlooded = false;
-                  if (bbox) {
-                    const centLat = (bbox.minLat + bbox.maxLat) / 2;
-                    const centLng = (bbox.minLng + bbox.maxLng) / 2;
-                    const estimate = estimateInundationAtLocation(
-                      centLat,
-                      centLng,
-                      stationsRef.current,
-                      rainRateRef.current,
-                      rain24hRef.current
-                    );
-                    isFlooded = estimate.estimatedDepthCm >= 6;
-                  }
-
-                  const boost = isFlooded ? 2.0 : 0;
-
-                  if (cls === "motorway" || cls === "trunk") {
-                    return (z >= 14 ? 5.5 : z >= 12 ? 4 : 2.5) + boost;
-                  }
-                  if (cls === "primary") {
-                    return (z >= 14 ? 4.5 : z >= 12 ? 3 : 2) + boost;
-                  }
-                  if (cls === "secondary") {
-                    return (z >= 14 ? 3.5 : z >= 12 ? 2.2 : 1.5) + boost;
-                  }
-                  if (cls === "tertiary") {
-                    return (z >= 14 ? 2.5 : z >= 12 ? 1.6 : 1) + boost;
-                  }
-                  return (z >= 14 ? 1.8 : z >= 13 ? 1.0 : 0) + (isFlooded && z >= 13 ? 1.5 : 0);
-                },
-                opacity: 0.92,
-              }),
+              minzoom: 8,
+              filter: (z: number, f: any) => {
+                const cls = f?.props?.class;
+                // At low zoom (<11), draw only motorways and primary highways to keep map fast & responsive
+                if (z < 11) {
+                  return cls === "motorway" || cls === "trunk" || cls === "primary";
+                }
+                // At mid zoom (11..12), add secondary roads
+                if (z < 13) {
+                  return cls === "motorway" || cls === "trunk" || cls === "primary" || cls === "secondary";
+                }
+                // At street-level zoom (>=13), exclude non-drivable footpaths / service steps to avoid clutter
+                return (
+                  cls !== "path" &&
+                  cls !== "footway" &&
+                  cls !== "pedestrian" &&
+                  cls !== "steps" &&
+                  cls !== "cycleway"
+                );
+              },
+              symbolizer: roadSymbolizer,
             },
           ],
           labelRules: [
-            // High-Legibility Crisp Road Name Labels
+            // High-Legibility Crisp Road Name Labels (street-level zoom only to save labeler index compute)
             {
               dataLayer: "transportation_name",
+              minzoom: 13,
               symbolizer: new protomapsL.LineLabelSymbolizer({
                 fill: "#f8fafc",
                 font: "600 11px system-ui, -apple-system, sans-serif",
@@ -274,12 +298,31 @@ export default function PMTilesFloodRoadsLayer({
             },
           ],
           maxDataZoom: 14,
+          tileDelay: 0,
         });
 
-        // Intercept renderTile to track active tile bounding box during canvas rendering
+        // Intercept renderTile to calculate flood estimation ONCE per tile before canvas painting
         const origRenderTile = (layer as any).renderTile.bind(layer);
-        (layer as any).renderTile = function (coords: any, canvas: HTMLCanvasElement, key: string, done: any) {
-          (layer as any)._currentTileBBox = tile2bbox(coords.x, coords.y, coords.z);
+        (layer as any).renderTile = function (
+          coords: any,
+          canvas: HTMLCanvasElement,
+          key: string,
+          done: any
+        ) {
+          const bbox = tile2bbox(coords.x, coords.y, coords.z);
+          const centLat = (bbox.minLat + bbox.maxLat) / 2;
+          const centLng = (bbox.minLng + bbox.maxLng) / 2;
+
+          // Calculate inundation once per tile (uses memoized cache in liveFloodGrid)
+          const estimate = estimateInundationAtLocation(
+            centLat,
+            centLng,
+            stationsRef.current,
+            rainRateRef.current,
+            rain24hRef.current
+          );
+
+          (canvas as any)._tileFloodEstimate = estimate;
           return origRenderTile(coords, canvas, key, done);
         };
 
@@ -326,3 +369,4 @@ export default function PMTilesFloodRoadsLayer({
 
   return null;
 }
+

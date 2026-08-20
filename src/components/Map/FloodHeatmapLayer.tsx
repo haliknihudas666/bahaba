@@ -70,8 +70,21 @@ export default function FloodHeatmapLayer({
   const [rain24h, setRain24h] = useState<number>(30);
   const heatmapPointsRef = useRef<FloodHeatmapPoint[]>([]);
 
-  // 1. Fetch live Open-Meteo rainfall for active viewport center
+  const lastFetchedCenterRef = useRef<{ lat: number; lng: number; time: number }>({
+    lat: 0,
+    lng: 0,
+    time: 0,
+  });
+
+  // 1. Fetch live Open-Meteo rainfall for active viewport center (distance-throttled)
   const fetchOpenMeteo = useCallback(async (lat: number, lng: number) => {
+    const now = Date.now();
+    const last = lastFetchedCenterRef.current;
+    const distMoved = Math.hypot(lat - last.lat, lng - last.lng);
+
+    if (distMoved < 0.045 && now - last.time < 60000) return;
+    lastFetchedCenterRef.current = { lat, lng, time: now };
+
     try {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=precipitation,rain&hourly=precipitation`;
       const res = await fetch(url);
@@ -89,23 +102,28 @@ export default function FloodHeatmapLayer({
     }
   }, []);
 
-  // Update center weather on map move
+  // Update center weather on map move (debounced)
   useEffect(() => {
     if (!map || !map._loaded) return;
-    const center = map.getCenter();
-    if (center && typeof center.lat === "number" && typeof center.lng === "number") {
-      fetchOpenMeteo(center.lat, center.lng);
-    }
 
+    let timeoutId: NodeJS.Timeout | null = null;
     const onMove = () => {
-      const c = map.getCenter();
-      if (c && typeof c.lat === "number" && typeof c.lng === "number") {
-        fetchOpenMeteo(c.lat, c.lng);
-      }
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        try {
+          const c = map.getCenter();
+          if (c && typeof c.lat === "number" && typeof c.lng === "number") {
+            fetchOpenMeteo(c.lat, c.lng);
+          }
+        } catch {}
+      }, 500);
     };
 
+    onMove();
     map.on("moveend", onMove);
+
     return () => {
+      if (timeoutId) clearTimeout(timeoutId);
       try {
         map.off("moveend", onMove);
       } catch {}

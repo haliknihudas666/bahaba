@@ -92,6 +92,10 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * c;
 }
 
+// Fast cache for spatial inundation estimates to eliminate repeated IDW and hotspot trigonometry
+const INUNDATION_CACHE = new Map<string, SpatialInundationEstimate>();
+const MAX_CACHE_SIZE = 500;
+
 /**
  * Inverse Distance Weighting (IDW) interpolation of telemetry rainfall
  * for any geographic point [lat, lng].
@@ -120,8 +124,13 @@ export function interpolateRainfall(
   for (const st of stations) {
     if (!st.latitude || !st.longitude || isNaN(st.latitude) || isNaN(st.longitude)) continue;
 
+    // Fast bounding box rejection (> ~0.8 deg / 88km)
+    const dLat = Math.abs(st.latitude - lat);
+    const dLng = Math.abs(st.longitude - lng);
+    if (dLat > 0.8 || dLng > 0.8) continue;
+
     const distKm = Math.max(0.2, haversineKm(lat, lng, st.latitude, st.longitude));
-    const weight = 1 / Math.pow(distKm, p);
+    const weight = 1 / (distKm * distKm); // distKm^2
 
     const alertScore =
       st.riskLevel === "CRITICAL"
@@ -158,7 +167,7 @@ export function interpolateRainfall(
 }
 
 /**
- * Calculates spatial flood inundation prediction for a specific coordinate.
+ * Calculates spatial flood inundation prediction for a specific coordinate with fast memoization.
  */
 export function estimateInundationAtLocation(
   lat: number,
@@ -168,6 +177,10 @@ export function estimateInundationAtLocation(
   localRain24h: number = 0,
   noahLevelOverride?: number
 ): SpatialInundationEstimate {
+  // Generate fast cache key (quantized to ~100m grid)
+  const cacheKey = `${lat.toFixed(3)}_${lng.toFixed(3)}_${localRainRate.toFixed(1)}_${localRain24h.toFixed(1)}_${stations.length}_${noahLevelOverride ?? 'def'}`;
+  const cached = INUNDATION_CACHE.get(cacheKey);
+  if (cached) return cached;
   // 1. Interpolate live rainfall from PAGASA stations + Open-Meteo
   const { rain1h, rain24h, riverAlertWeight } = interpolateRainfall(
     lat,
@@ -218,7 +231,7 @@ export function estimateInundationAtLocation(
   // Normalize risk intensity: 0.0 (0 cm) to 1.0 (>= 45 cm)
   const riskIntensity = Math.min(1.0, Math.max(0.0, roundedDepth / 45.0));
 
-  return {
+  const result: SpatialInundationEstimate = {
     lat,
     lng,
     rain1hMm: effectiveRain1h,
@@ -230,6 +243,13 @@ export function estimateInundationAtLocation(
     color: classification.color,
     label: classification.label,
   };
+
+  if (INUNDATION_CACHE.size >= MAX_CACHE_SIZE) {
+    INUNDATION_CACHE.clear();
+  }
+  INUNDATION_CACHE.set(cacheKey, result);
+
+  return result;
 }
 
 /**

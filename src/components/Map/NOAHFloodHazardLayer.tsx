@@ -20,10 +20,14 @@
 
 import { useEffect, useRef } from "react";
 import * as protomapsL from "protomaps-leaflet";
+import { createCachedPMTiles } from "@/lib/pmtiles/cachedSource";
 
 /** UP NOAH 100-Year Flood Hazard PMTiles hosted on Hugging Face */
 const NOAH_PMTILES_URL =
   "https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps/resolve/main/PMTiles/layers/flood_100yr.pmtiles";
+
+// Module-level persistent PMTiles instance with IndexedDB and RAM chunk caching
+const noahPMTilesSource = createCachedPMTiles(NOAH_PMTILES_URL);
 
 // Module-level singleton layer cache across toggles and re-renders
 let cachedProtomapsLayer: any = null;
@@ -48,31 +52,48 @@ export default function NOAHFloodHazardLayer({
     if (!cachedProtomapsLayer) {
       try {
         cachedProtomapsLayer = protomapsL.leafletLayer({
-          url: NOAH_PMTILES_URL,
+          url: noahPMTilesSource as any,
           paintRules: [
+            // ── High Hazard (Var = 3 / Above Neck / Waist Deep >1.5m) ──
             {
               dataLayer: "flood_100yr",
+              minzoom: 8,
+              filter: (_z: number, f: any) => (f?.props?.Var ?? f?.props?.var) === 3,
               symbolizer: new protomapsL.PolygonSymbolizer({
-                fill: (_z: number, f: any) => {
-                  const varLevel = f?.props?.Var ?? f?.props?.var ?? 1;
-                  if (varLevel === 3) return "rgba(239, 68, 68, 0.48)"; // High (Red)
-                  if (varLevel === 2) return "rgba(249, 115, 22, 0.42)"; // Medium (Orange)
-                  if (varLevel === 1) return "rgba(59, 130, 246, 0.35)";  // Low (Blue)
-                  return "rgba(59, 130, 246, 0.25)";
-                },
-                stroke: (_z: number, f: any) => {
-                  const varLevel = f?.props?.Var ?? f?.props?.var ?? 1;
-                  if (varLevel === 3) return "rgba(239, 68, 68, 0.85)";
-                  if (varLevel === 2) return "rgba(249, 115, 22, 0.75)";
-                  if (varLevel === 1) return "rgba(59, 130, 246, 0.65)";
-                  return "rgba(59, 130, 246, 0.50)";
-                },
-                width: 1,
+                fill: "rgba(239, 68, 68, 0.45)",
+                opacity: 1,
+                width: 0,
+              }),
+            },
+            // ── Medium Hazard (Var = 2 / Knee to Neck 0.5m - 1.5m) ──
+            {
+              dataLayer: "flood_100yr",
+              minzoom: 8,
+              filter: (_z: number, f: any) => (f?.props?.Var ?? f?.props?.var) === 2,
+              symbolizer: new protomapsL.PolygonSymbolizer({
+                fill: "rgba(249, 115, 22, 0.40)",
+                opacity: 1,
+                width: 0,
+              }),
+            },
+            // ── Low Hazard (Var = 1 / Ankle to Knee < 0.5m) ──
+            {
+              dataLayer: "flood_100yr",
+              minzoom: 8,
+              filter: (_z: number, f: any) => {
+                const v = f?.props?.Var ?? f?.props?.var ?? 1;
+                return v === 1 || (v !== 2 && v !== 3);
+              },
+              symbolizer: new protomapsL.PolygonSymbolizer({
+                fill: "rgba(59, 130, 246, 0.32)",
+                opacity: 1,
+                width: 0,
               }),
             },
           ],
           labelRules: [],
           maxDataZoom: 14,
+          tileDelay: 0,
         });
       } catch (err) {
         console.warn("[NOAHFloodHazardLayer] Error creating protomaps layer:", err);
