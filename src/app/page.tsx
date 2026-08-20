@@ -52,6 +52,13 @@ export default function HomePage() {
   const [showFloodHeatmap, setShowFloodHeatmap] = useState<boolean>(true);
   const [showFloodHazard, setShowFloodHazard] = useState<boolean>(false);
 
+  // Close flood safe directions sidebar by default on mobile devices
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+    }
+  }, []);
+
   // Travel Mode (Driving vs Walking) & Vehicle Type State
   const [travelMode, setTravelMode] = useState<TravelMode>("driving");
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>("all");

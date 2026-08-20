@@ -164,10 +164,10 @@ export default function MapLegend({
                 <span className="text-sm">🌊</span>
                 <div>
                   <div className="text-xs font-bold text-slate-100 leading-tight">
-                    NOAH 100-Yr Zones
+                    NOAH Flood Risk Hazard
                   </div>
                   <div className="text-[10px] text-slate-400 leading-tight">
-                    Worst-case scenario polygons
+                    Worst-case scenario using 100-year return of UP NOAH
                   </div>
                 </div>
               </div>
@@ -245,11 +245,10 @@ export default function MapLegend({
         {/* Toggle Overlays Button */}
         <button
           onClick={() => togglePopover("overlays")}
-          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${
-            activePopover === "overlays"
-              ? "bg-cyan-600 text-white shadow-md"
-              : "bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white"
-          }`}
+          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${activePopover === "overlays"
+            ? "bg-cyan-600 text-white shadow-md"
+            : "bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white"
+            }`}
           title="Toggle Map Overlays & Layers"
         >
           <span>🗺️</span>
@@ -262,11 +261,10 @@ export default function MapLegend({
         {/* Toggle Legend Button */}
         <button
           onClick={() => togglePopover("legend")}
-          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${
-            activePopover === "legend"
-              ? "bg-cyan-600 text-white shadow-md"
-              : "bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white"
-          }`}
+          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${activePopover === "legend"
+            ? "bg-cyan-600 text-white shadow-md"
+            : "bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white"
+            }`}
           title="Toggle Map Flood Risk Legend"
         >
           <span>🎨</span>
