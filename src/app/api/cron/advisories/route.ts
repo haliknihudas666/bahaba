@@ -51,11 +51,16 @@ export async function GET(req?: Request): Promise<NextResponse<AdvisorySyncResul
     });
   }
 
-  // 2. Primary Source: Fetch from MongoDB collection populated by the worker
+  // 2. Primary Source: Fetch from MongoDB collection populated by the worker (24h retention window)
   try {
     const advisoriesCol = await getCollection<ReportedAdvisory>("advisories");
+    const cutoffIso = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+
+    // Background housekeeping: asynchronously purge records older than 24 hours
+    advisoriesCol.deleteMany({ publishedAt: { $lt: cutoffIso } }).catch(() => {});
+
     const docs = await advisoriesCol
-      .find({})
+      .find({ publishedAt: { $gte: cutoffIso } })
       .sort({ publishedAt: -1 })
       .limit(fetchLimit)
       .project({ _id: 0 })

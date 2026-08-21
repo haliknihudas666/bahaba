@@ -134,9 +134,11 @@ export async function scrapeAdvisories(): Promise<AdvisorySyncResult> {
     }
   }
 
-  // Parse all raw inputs through NLP & geocoder
+  // Parse all raw inputs through NLP & geocoder (enforcing 24h retention window)
+  const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
   const advisories: ReportedAdvisory[] = rawItems
     .map(parseAdvisoryPost)
+    .filter((a) => new Date(a.publishedAt).getTime() >= cutoffMs)
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
   const activeFloodCount = advisories.filter(

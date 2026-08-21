@@ -58,6 +58,13 @@ function buildNewsSearchUrl(handle: string): string {
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // Scrape every 5 minutes
 const AUTH_FILE = path.resolve(__dirname, "x-auth.json");
 
+const RETENTION_HOURS = 24;
+const RETENTION_MS = RETENTION_HOURS * 60 * 60 * 1000;
+
+function getRetentionCutoff(): Date {
+  return new Date(Date.now() - RETENTION_MS);
+}
+
 // In-memory cache of known advisory hashes to avoid stressing MongoDB with duplicate bulk writes
 const knownPostHashes = new Map<string, string>();
 let isCacheSeeded = false;
@@ -67,21 +74,22 @@ function hashAdvisory(advisory: any): string {
 }
 
 async function seedAdvisoriesCache(db: Db) {
-  if (isCacheSeeded) return;
+  const cutoffIso = getRetentionCutoff().toISOString();
   try {
     const existing = await db
       .collection("advisories")
-      .find({})
+      .find({ publishedAt: { $gte: cutoffIso } })
       .project({ id: 1, status: 1, isFloodReport: 1, severity: 1, text: 1 })
       .toArray();
 
+    knownPostHashes.clear();
     for (const doc of existing) {
       if (doc.id) {
         knownPostHashes.set(doc.id, hashAdvisory(doc));
       }
     }
     isCacheSeeded = true;
-    console.log(`[Cache] Pre-seeded ${knownPostHashes.size} known advisory signatures from MongoDB into memory.`);
+    console.log(`[Cache] Pre-seeded ${knownPostHashes.size} active 24h advisory signatures from MongoDB into memory.`);
   } catch (err: any) {
     console.warn("[Cache] Could not pre-seed cache from MongoDB:", err.message);
   }
@@ -412,13 +420,17 @@ export async function runScraperJob() {
 
     const allRawItems: RawTweetInput[] = [];
 
-    // Parse --backfill flag for initial deep scrape
+    // Parse --backfill flag for initial deep scrape, otherwise enforce 24-hour retention window
     const backfillArg = process.argv.find((a) => a.startsWith("--backfill"));
-    let cutoffDate: Date | undefined;
+    const retentionCutoff = getRetentionCutoff();
+    let cutoffDate: Date = retentionCutoff;
+
     if (backfillArg) {
       const dateStr = backfillArg.includes("=") ? backfillArg.split("=")[1] : "2026-08-15";
       cutoffDate = new Date(dateStr);
       console.log(`[Scraper] Backfill mode: scrolling until ${cutoffDate.toISOString().split("T")[0]}`);
+    } else {
+      console.log(`[Scraper] 24-hour retention window: scrolling up to ${cutoffDate.toISOString()}`);
     }
 
     for (const handle of GOV_HANDLES) {
@@ -433,22 +445,38 @@ export async function runScraperJob() {
       allRawItems.push(...items);
     }
 
+    const db = await getDatabase();
+
+    // 1. Housekeeping: Delete any advisories older than 24 hours from MongoDB
+    const cutoffIso = retentionCutoff.toISOString();
+    try {
+      const deleteResult = await db.collection("advisories").deleteMany({
+        publishedAt: { $lt: cutoffIso },
+      });
+      if (deleteResult.deletedCount > 0) {
+        console.log(`🧹 [Retention Cleanup] Deleted ${deleteResult.deletedCount} advisories older than 24 hours from MongoDB.`);
+      }
+    } catch (cleanErr: any) {
+      console.warn("⚠️ [Retention Cleanup Error]:", cleanErr.message);
+    }
+
     if (allRawItems.length === 0) {
       console.log("[Scraper] No posts extracted in this cycle.");
       return;
     }
 
     // Parse all raw items through NLP, depth analysis, and landmark geocoder
+    // Retain only items within the 24-hour window (or cutoffDate if backfilling)
     const advisories = allRawItems
       .map(parseAdvisoryPost)
+      .filter((a) => new Date(a.publishedAt) >= cutoffDate)
       .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
     const activeFloodCount = advisories.filter((a) => a.isFloodReport && a.status === "ACTIVE").length;
 
-    console.log(`[Parser] Processed ${advisories.length} total advisories (${activeFloodCount} active flood alerts).`);
+    console.log(`[Parser] Processed ${advisories.length} advisories within 24h retention (${activeFloodCount} active flood alerts).`);
 
     // Write to MongoDB with In-Memory Caching (Dirty-check before write)
-    const db = await getDatabase();
     await seedAdvisoriesCache(db);
 
     const changedAdvisories = advisories.filter((advisory) => {
@@ -483,6 +511,11 @@ export async function runScraperJob() {
       console.log(`⚡ [Cache Hit] All ${advisories.length} advisories are already up-to-date in MongoDB. Skipped DB writes.`);
     }
 
+    // Get current total count of active 24h advisories in MongoDB
+    const currentTotalInDb = await db.collection("advisories").countDocuments({
+      publishedAt: { $gte: cutoffIso },
+    });
+
     // Write Sync Metadata
     await db.collection("sync_meta").updateOne(
       { _id: "advisories" as any },
@@ -490,9 +523,10 @@ export async function runScraperJob() {
         $set: {
           _id: "advisories" as any,
           lastSyncedAt: new Date().toISOString(),
-          totalCount: advisories.length,
+          totalCount: currentTotalInDb,
           activeFloodCount,
           durationMs: Date.now() - start,
+          retentionHours: RETENTION_HOURS,
         },
       },
       { upsert: true }
