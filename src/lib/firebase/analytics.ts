@@ -191,3 +191,17 @@ export function trackDonationAction(params: {
   });
 }
 
+/** Track About / Info modal interactions */
+export function trackAboutAction(params: {
+  action: "open_modal" | "tab_switch" | "external_link_click";
+  tabName?: string;
+  linkName?: string;
+}) {
+  logAnalyticsEvent("about_interaction", {
+    about_action: params.action,
+    tab_name: params.tabName ?? "overview",
+    link_name: params.linkName,
+  });
+}
+
+

@@ -16,6 +16,7 @@ import MapLegend from "@/components/Layout/MapLegend";
 import ShareModal from "@/components/ShareModal";
 import DonationModal from "@/components/DonationModal";
 import AdvisoryWallModal from "@/components/Advisory/AdvisoryWallModal";
+import AboutModal from "@/components/AboutModal";
 import {
   fetchAndEvaluateRoute,
   type RouteOption,
@@ -59,6 +60,7 @@ export default function HomePage() {
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isDonationModalOpen, setIsDonationModalOpen] = useState<boolean>(false);
   const [isAdvisoryModalOpen, setIsAdvisoryModalOpen] = useState<boolean>(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [recenterTrigger, setRecenterTrigger] = useState<number>(0);
@@ -390,6 +392,7 @@ export default function HomePage() {
         onOpenDonationModal={() => setIsDonationModalOpen(true)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         onOpenAdvisoryModal={() => setIsAdvisoryModalOpen(true)}
+        onOpenAboutModal={() => setIsAboutModalOpen(true)}
         activeAdvisoryCount={activeFloodCount}
         onOpenDrawer={() => {
           setIsDrawerOpen(true);
@@ -506,6 +509,16 @@ export default function HomePage() {
         onRefresh={refreshAdvisories}
         onSelectAdvisory={(advisory) => {
           setSelectedAdvisory(advisory);
+        }}
+      />
+
+      {/* ── 10. ABOUT BAHA BA? & DATA SOURCES ATTRIBUTIONS MODAL ────────── */}
+      <AboutModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
+        onOpenDonationModal={() => {
+          setIsAboutModalOpen(false);
+          setIsDonationModalOpen(true);
         }}
       />
     </div>

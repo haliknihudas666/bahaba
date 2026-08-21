@@ -22,6 +22,7 @@ interface MapHeaderControlsProps {
   onOpenShareModal: () => void;
   onOpenDrawer: () => void;
   onOpenAdvisoryModal: () => void;
+  onOpenAboutModal: () => void;
   activeAdvisoryCount?: number;
 }
 
@@ -34,18 +35,23 @@ export default function MapHeaderControls({
   onOpenShareModal,
   onOpenDrawer,
   onOpenAdvisoryModal,
+  onOpenAboutModal,
   activeAdvisoryCount = 0,
 }: MapHeaderControlsProps) {
   return (
     <header className="absolute top-2.5 left-2.5 right-2.5 sm:top-4 sm:left-4 sm:right-4 z-[500] pointer-events-none flex items-center justify-between gap-1.5 sm:gap-4">
       {/* Left: Brand Logo & Live Pulse */}
-      <div className="pointer-events-auto flex items-center gap-2 bg-slate-900/90 backdrop-blur-xl border border-slate-800/90 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl shadow-2xl flex-shrink-0">
-        <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm sm:text-lg shadow-md shadow-cyan-500/30 flex-shrink-0">
+      <button
+        onClick={onOpenAboutModal}
+        className="pointer-events-auto flex items-center gap-2 bg-slate-900/90 hover:bg-slate-800/95 backdrop-blur-xl border border-slate-800/90 hover:border-cyan-500/50 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl shadow-2xl flex-shrink-0 transition-all text-left group"
+        title="About Baha Ba? & Data Attributions"
+      >
+        <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm sm:text-lg shadow-md shadow-cyan-500/30 flex-shrink-0 group-hover:scale-105 transition-transform">
           🌊
         </div>
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">
-            <h1 className="text-xs sm:text-base font-black tracking-tight text-white leading-none">
+            <h1 className="text-xs sm:text-base font-black tracking-tight text-white leading-none group-hover:text-cyan-300 transition-colors">
               Baha Ba?
             </h1>
             <span className="relative flex h-1.5 w-1.5">
@@ -62,7 +68,7 @@ export default function MapHeaderControls({
             )}
           </div>
         </div>
-      </div>
+      </button>
 
       {/* Center: HUD Telemetry Quick Metric Chips (Desktop only) */}
       <div className="pointer-events-auto hidden xl:flex items-center gap-2 bg-slate-900/90 backdrop-blur-xl border border-slate-800/90 px-3 py-1.5 rounded-2xl shadow-2xl">
@@ -186,6 +192,23 @@ export default function MapHeaderControls({
             />
           </svg>
           <span className="hidden sm:inline">Share</span>
+        </button>
+
+        {/* About & Data Attributions Info Button */}
+        <button
+          onClick={onOpenAboutModal}
+          className="flex items-center gap-1 text-[11px] sm:text-xs font-bold p-1.5 sm:px-3 sm:py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700 hover:border-cyan-500/60 shadow-xl backdrop-blur-xl transition-all active:scale-95 flex-shrink-0"
+          title="About Baha Ba? Project, PAGASA, NOAH & Social Media Attributions"
+        >
+          <svg className="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span className="hidden sm:inline">About</span>
         </button>
 
         {/* Sync Telemetry Button */}
