@@ -214,7 +214,7 @@ export default function RoadFloodMap({
           iconAnchor: [12, 12],
         });
 
-        const marker = L.marker([st.latitude, st.longitude], { icon: customIcon })
+        const marker = L.marker([st.latitude, st.longitude], { icon: customIcon, keyboard: false })
           .addTo(map)
           .bindPopup(`
             <div style="font-family: sans-serif; padding: 4px; color: #0f172a; min-width: 180px;">
@@ -302,7 +302,7 @@ export default function RoadFloodMap({
             iconAnchor: [30, 15],
           });
 
-          const marker = L.marker([lat, lng], { icon: beaconIcon, zIndexOffset: 1000 }).addTo(map);
+          const marker = L.marker([lat, lng], { icon: beaconIcon, zIndexOffset: 1000, keyboard: false }).addTo(map);
           selectedRoadMarkerRef.current = marker;
         } catch (err) {
           console.warn("[RoadFocus flyTo error]", err);
@@ -473,7 +473,7 @@ export default function RoadFloodMap({
             iconSize: [32, 32],
             iconAnchor: [16, 16],
           });
-          L.marker(originCoords, { icon: pinA, zIndexOffset: 500 })
+          L.marker(originCoords, { icon: pinA, zIndexOffset: 500, keyboard: false })
             .addTo(routeGroup)
             .bindPopup(`<strong>📍 Point A (${isWalking ? "Start Walking" : "Origin"})</strong>`);
         }
@@ -502,7 +502,7 @@ export default function RoadFloodMap({
             iconSize: [32, 32],
             iconAnchor: [16, 16],
           });
-          L.marker(destinationCoords, { icon: pinB, zIndexOffset: 500 })
+          L.marker(destinationCoords, { icon: pinB, zIndexOffset: 500, keyboard: false })
             .addTo(routeGroup)
             .bindPopup(`<strong>🎯 Point B (${isWalking ? "Walking Destination" : "Destination"})</strong>`);
         }

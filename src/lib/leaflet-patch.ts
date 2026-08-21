@@ -98,4 +98,47 @@ export function patchLeafletBounds(L: any) {
       }
     };
   }
+
+  // 4. Patch L.DomEvent.off and removeListener to guard against undefined element / _leaflet_events
+  if (L.DomEvent && !(L.DomEvent as any).__bahaba_domevent_patched__) {
+    (L.DomEvent as any).__bahaba_domevent_patched__ = true;
+    const originalOff = L.DomEvent.off;
+    const safeOff = function (this: any, obj: any, types: any, fn: any, context: any) {
+      if (!obj) return this;
+      try {
+        return originalOff.call(this, obj, types, fn, context);
+      } catch {
+        return this;
+      }
+    };
+    L.DomEvent.off = safeOff;
+    L.DomEvent.removeListener = safeOff;
+  }
+
+  // 5. Patch L.Marker.prototype.onRemove and _removeIcon to prevent teardown crashes on null _icon
+  if (L.Marker && L.Marker.prototype && !(L.Marker.prototype as any).__bahaba_marker_patched__) {
+    (L.Marker.prototype as any).__bahaba_marker_patched__ = true;
+    const originalMarkerOnRemove = L.Marker.prototype.onRemove;
+    const originalMarkerRemoveIcon = L.Marker.prototype._removeIcon;
+
+    L.Marker.prototype.onRemove = function (this: any, map: any) {
+      try {
+        if (!this._icon && !this._map) return;
+        originalMarkerOnRemove.call(this, map);
+      } catch {
+        // Suppress teardown exception
+      }
+    };
+
+    if (originalMarkerRemoveIcon) {
+      L.Marker.prototype._removeIcon = function (this: any) {
+        try {
+          if (!this._icon) return;
+          originalMarkerRemoveIcon.call(this);
+        } catch {
+          // Suppress teardown exception
+        }
+      };
+    }
+  }
 }

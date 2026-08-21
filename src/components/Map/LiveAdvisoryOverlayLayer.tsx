@@ -7,6 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import type { ReportedAdvisory } from "@/types/advisory";
+import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 function formatTimeAgo(isoString: string): string {
   try {
@@ -46,11 +47,14 @@ export default function LiveAdvisoryOverlayLayer({
 }: LiveAdvisoryOverlayLayerProps) {
   const layerGroupRef = useRef<any>(null);
   const markersMapRef = useRef<Map<string, any>>(new Map());
+  const onSelectAdvisoryRef = useRef(onSelectAdvisory);
+  onSelectAdvisoryRef.current = onSelectAdvisory;
 
-  // 1. Initialize Layer Group and render markers
+  // 1. Initialize Layer Group and render markers when advisories list changes
   useEffect(() => {
     const L = (window as any).L;
     if (!L || !map || !mapLoaded || !map._loaded) return;
+    patchLeafletBounds(L);
 
     try {
       if (!layerGroupRef.current) {
@@ -70,7 +74,6 @@ export default function LiveAdvisoryOverlayLayer({
         const isCritical = advisory.severity === "CRITICAL";
         const isAlarm = advisory.severity === "ALARM";
         const isSubsided = advisory.status === "SUBSIDED";
-        const isSelected = selectedAdvisory?.id === advisory.id;
 
         const pinColor = isCritical
           ? "#ef4444" // Red
@@ -88,8 +91,8 @@ export default function LiveAdvisoryOverlayLayer({
                 : ""
             }
             <div style="
-              width: ${isSelected ? "26px" : "20px"};
-              height: ${isSelected ? "26px" : "20px"};
+              width: 22px;
+              height: 22px;
               border-radius: 50%;
               background: radial-gradient(circle, #ffffff 15%, ${pinColor} 80%);
               border: 2px solid #ffffff;
@@ -152,12 +155,10 @@ export default function LiveAdvisoryOverlayLayer({
           </div>
         `;
 
-        const marker = L.marker([lat, lng], { icon: customIcon })
+        const marker = L.marker([lat, lng], { icon: customIcon, keyboard: false })
           .bindPopup(popupContent, { maxWidth: 260 })
           .on("click", () => {
-            if (onSelectAdvisory) {
-              onSelectAdvisory(advisory);
-            }
+            onSelectAdvisoryRef.current?.(advisory);
           });
 
         layerGroup.addLayer(marker);
@@ -166,16 +167,23 @@ export default function LiveAdvisoryOverlayLayer({
     } catch (err) {
       console.warn("[LiveAdvisoryOverlayLayer render error]", err);
     }
+  }, [map, mapLoaded, advisories]);
 
+  // Clean up layer group on map destruction or component unmount
+  useEffect(() => {
     return () => {
       try {
-        if (layerGroupRef.current) {
+        if (layerGroupRef.current && map) {
+          if (map.hasLayer && map.hasLayer(layerGroupRef.current)) {
+            map.removeLayer(layerGroupRef.current);
+          }
           layerGroupRef.current.clearLayers();
         }
       } catch {}
+      layerGroupRef.current = null;
       markersMapRef.current.clear();
     };
-  }, [map, mapLoaded, advisories, selectedAdvisory, onSelectAdvisory]);
+  }, [map]);
 
   // 2. Focus / flyTo when selectedAdvisory changes
   useEffect(() => {
