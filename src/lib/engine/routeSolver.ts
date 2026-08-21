@@ -74,6 +74,13 @@ export const VEHICLE_CONFIGS: Record<VehicleType, VehicleConfig> = {
 
 export type TrafficLevel = "SMOOTH" | "MODERATE" | "HEAVY" | "STANDSTILL";
 
+export interface RouteTrafficBreakdown {
+  rushHourDelayMin: number;
+  weatherDelayMin: number;
+  floodDelayMin: number;
+  rushHourLabel?: string;
+}
+
 export interface RouteTrafficData {
   level: TrafficLevel;
   color: string;
@@ -81,6 +88,7 @@ export interface RouteTrafficData {
   delayMin: number;
   averageSpeedKmH: number;
   description: string;
+  breakdown?: RouteTrafficBreakdown;
 }
 
 export type WalkabilityCategory =
@@ -88,6 +96,13 @@ export type WalkabilityCategory =
   | "WALKABLE_BOOTS"
   | "HAZARDOUS_WADING"
   | "IMPASSABLE_DANGEROUS";
+
+export interface RouteWalkabilityBreakdown {
+  baseWalkMin: number;
+  wadingDelayMin: number;
+  rainDelayMin: number;
+  averageSpeedKmH: number;
+}
 
 export interface RouteWalkabilityData {
   category: WalkabilityCategory;
@@ -98,11 +113,13 @@ export interface RouteWalkabilityData {
   baseDurationMin: number;
   adjustedDurationMin: number;
   wadingDelayMin: number;
+  rainDelayMin?: number;
   maxWadingDepthCm: number;
   hasLeptospirosisRisk: boolean;
   hasManholeHazard: boolean;
   recommendedGear: string[];
   safetyTips: string[];
+  breakdown?: RouteWalkabilityBreakdown;
 }
 
 export interface RouteVehiclePassability {
@@ -121,7 +138,7 @@ export interface RouteOption {
   summary: string;
   distanceKm: number;
   durationMin: number; // Traffic-adjusted or wading-adjusted duration in minutes
-  baseDurationMin: number; // Unadjusted OSRM baseline duration
+  baseDurationMin: number; // Unadjusted baseline duration
   geometry: [number, number][]; // Full route [lat, lng] array
   segmentedRoute: RouteSegmentData[];
   maxFloodDepthCm: number;
@@ -202,7 +219,17 @@ export async function fetchAndEvaluateRoute(
               : "Fastest Route"
             : `Alternative ${mode === "walking" ? "Walk" : "Route"} ${idx}`);
         const distanceKm = Number((rt.distance / 1000).toFixed(1));
-        const baseDurationMin = Math.max(1, Math.round(rt.duration / 60));
+
+        // Realistic Baseline Duration:
+        // - Walking: Pedestrian standard pace is 4.5 km/h (~13.3 min/km in urban terrain with street crossings).
+        // - Driving: Realistic urban base speed (28 km/h without traffic/flood), compared with OSRM's free-flow.
+        let baseDurationMin: number;
+        if (mode === "walking") {
+          baseDurationMin = Math.max(1, Math.round((distanceKm / 4.5) * 60));
+        } else {
+          const urbanBaseMin = Math.max(1, Math.round((distanceKm / 28) * 60));
+          baseDurationMin = Math.max(urbanBaseMin, Math.max(1, Math.round((rt.duration || 0) / 60)));
+        }
 
         // Steps 2, 3, 4: Segment polyline, fetch elevation, check rainfall & predict flooding
         const segmented = await segmentPolylineWithFloodRisk(rawCoords, stations, mode);
@@ -248,7 +275,7 @@ export async function fetchAndEvaluateRoute(
         let durationMin = baseDurationMin;
 
         if (mode === "driving") {
-          // Calculate traffic slowdown & delay based on baseline speed & flood bottleneck points
+          // Calculate traffic slowdown & delay based on baseline speed, rush hour, weather, & flood bottlenecks
           traffic = calculateRouteTraffic(distanceKm, baseDurationMin, maxFloodDepthCm, segmented);
           durationMin = baseDurationMin + traffic.delayMin;
 
@@ -472,38 +499,95 @@ export async function segmentPolylineWithFloodRisk(
 
 /**
  * Computes vehicle traffic conditions and estimated congestion delay (in minutes).
+ * Evaluates:
+ * 1. Base urban driving speed with stoplights/intersections (~28 km/h).
+ * 2. Real-time Rush Hour congestion index (Philippine Time UTC+8).
+ * 3. Inclement weather / heavy rain road delays.
+ * 4. Flood bottlenecks and lane submergence slowdowns.
  */
 export function calculateRouteTraffic(
   distanceKm: number,
   baseDurationMin: number,
   maxFloodDepthCm: number,
-  segments: RouteSegmentData[]
+  segments: RouteSegmentData[],
+  now: Date = new Date()
 ): RouteTrafficData {
-  let trafficDelayMin = 0;
+  // 1. Time-of-day / Rush Hour Congestion Modeling (Philippine Standard Time UTC+8)
+  const manilaHour = (now.getUTCHours() + 8) % 24;
+  const manilaMinute = now.getUTCMinutes();
+  const timeDecimal = manilaHour + manilaMinute / 60;
 
-  // 1. Calculate flood-induced bottleneck delay across all segments
+  let rushFactor = 0.15; // default day traffic
+  let rushHourLabel = "Normal Urban Traffic";
+
+  if (timeDecimal >= 7.0 && timeDecimal < 10.0) {
+    // Morning Rush (07:00 - 10:00)
+    rushFactor = 0.55;
+    rushHourLabel = "Morning Rush Hour";
+  } else if (timeDecimal >= 11.5 && timeDecimal < 13.5) {
+    // Midday Lunch Busy (11:30 - 13:30)
+    rushFactor = 0.28;
+    rushHourLabel = "Midday Urban Traffic";
+  } else if (timeDecimal >= 17.0 && timeDecimal < 21.0) {
+    // Evening Peak Rush (17:00 - 21:00)
+    rushFactor = 0.65;
+    rushHourLabel = "Evening Peak Rush Hour";
+  } else if (
+    (timeDecimal >= 6.0 && timeDecimal < 7.0) ||
+    (timeDecimal >= 10.0 && timeDecimal < 11.5) ||
+    (timeDecimal >= 13.5 && timeDecimal < 17.0) ||
+    (timeDecimal >= 21.0 && timeDecimal < 22.5)
+  ) {
+    // Regular active hours
+    rushFactor = 0.20;
+    rushHourLabel = "Moderate Daytime Traffic";
+  } else {
+    // Off-peak late night / early dawn (22:30 - 06:00)
+    rushFactor = 0.0;
+    rushHourLabel = "Off-Peak Clear Flow";
+  }
+
+  const rushHourDelayMin = Math.round(baseDurationMin * rushFactor);
+
+  // 2. Weather and Flood Segment Delays
+  let weatherDelayMin = 0;
+  let floodDelayMin = 0;
+
   segments.forEach((seg) => {
     const segDist = seg.segmentDistanceKm || 0.3;
-    // Expected normal segment driving time in minutes at 30 km/h:
-    const segBaseMin = (segDist / 30) * 60;
+    // Expected normal segment driving time in minutes at baseline urban speed (~28 km/h):
+    const segBaseMin = (segDist / 28) * 60;
 
+    // Rain slowdown on wet asphalt / reduced visibility
+    if (seg.rainMmHr >= 25) {
+      weatherDelayMin += segBaseMin * 0.45; // Torrential downpour
+    } else if (seg.rainMmHr >= 10) {
+      weatherDelayMin += segBaseMin * 0.25; // Moderate-heavy rain
+    } else if (seg.rainMmHr >= 2) {
+      weatherDelayMin += segBaseMin * 0.10; // Light rain / wet roads
+    }
+
+    // Flood bottleneck delay
     if (seg.depthCm > 30) {
-      // Impassable / Gridlock: 10x delay
-      trafficDelayMin += segBaseMin * 9.0;
+      // Impassable / Gridlock: extreme delay multiplier
+      floodDelayMin += segBaseMin * 9.0;
     } else if (seg.depthCm >= 16) {
-      // Half-tire: crawl speed 6 km/h -> 4x delay
-      trafficDelayMin += segBaseMin * 3.5;
+      // Half-tire: crawl speed 4-6 km/h -> 4x delay
+      floodDelayMin += segBaseMin * 4.0;
     } else if (seg.depthCm >= 6) {
-      // Gutter-deep: crawl speed 15 km/h -> 1.5x delay
-      trafficDelayMin += segBaseMin * 1.2;
-    } else if (seg.rainMmHr > 15) {
-      // Heavy rain driving slowdown
-      trafficDelayMin += segBaseMin * 0.4;
+      // Gutter-deep: crawl speed 12-15 km/h -> 1.5x delay
+      floodDelayMin += segBaseMin * 1.5;
+    } else if (seg.depthCm >= 2) {
+      // Minor standing water
+      floodDelayMin += segBaseMin * 0.2;
     }
   });
 
-  trafficDelayMin = Math.round(trafficDelayMin);
-  const totalDurationMin = Math.max(1, baseDurationMin + trafficDelayMin);
+  const roundedWeatherDelay = Math.round(weatherDelayMin);
+  const roundedFloodDelay = Math.round(floodDelayMin);
+  const totalDelayMin = rushHourDelayMin + roundedWeatherDelay + roundedFloodDelay;
+
+  const totalDurationMin = Math.max(1, baseDurationMin + totalDelayMin);
   const averageSpeedKmH = Math.max(
     3,
     Number((distanceKm / (totalDurationMin / 60)).toFixed(1))
@@ -511,33 +595,44 @@ export function calculateRouteTraffic(
 
   let level: TrafficLevel = "SMOOTH";
   let color = "#10b981"; // Emerald
-  let label = "Fast / Clear Flow";
-  let description = "Normal driving speed with minimal weather delay.";
+  let label = rushHourLabel;
+  let description = "Normal driving speed with smooth flow.";
 
   if (maxFloodDepthCm > 30 || averageSpeedKmH <= 7) {
     level = "STANDSTILL";
     color = "#ef4444"; // Red
     label = "Severe Gridlock / Standstill";
-    description = "Road is submerged/impassable with severe traffic standstill.";
-  } else if (maxFloodDepthCm >= 16 || averageSpeedKmH <= 15 || trafficDelayMin >= 15) {
+    description = "Roadway submerged or impassable with severe traffic standstill.";
+  } else if (maxFloodDepthCm >= 16 || averageSpeedKmH <= 14 || totalDelayMin >= 15) {
     level = "HEAVY";
     color = "#f97316"; // Orange
-    label = "Heavy Traffic Delay";
-    description = "Slow-moving traffic crawl due to flooded lanes and bottlenecks.";
-  } else if (maxFloodDepthCm >= 6 || averageSpeedKmH <= 24 || trafficDelayMin >= 5) {
+    label = `${rushHourLabel} (Heavy Congestion)`;
+    description = "Slow-moving bumper-to-bumper traffic crawl due to congestion and bottlenecks.";
+  } else if (maxFloodDepthCm >= 6 || averageSpeedKmH <= 22 || totalDelayMin >= 4) {
     level = "MODERATE";
     color = "#eab308"; // Yellow
-    label = "Moderate Traffic";
-    description = "Minor delays from gutter-deep water and wet road conditions.";
+    label = `${rushHourLabel} (Moderate)`;
+    description = "Moderate traffic flow with typical urban intersections and wet road slowdown.";
+  } else {
+    level = "SMOOTH";
+    color = "#10b981";
+    label = rushHourLabel === "Off-Peak Clear Flow" ? "Off-Peak Fast Flow" : "Smooth Flow";
+    description = "Clear road conditions with steady traffic speed.";
   }
 
   return {
     level,
     color,
     label,
-    delayMin: trafficDelayMin,
+    delayMin: totalDelayMin,
     averageSpeedKmH,
     description,
+    breakdown: {
+      rushHourDelayMin,
+      weatherDelayMin: roundedWeatherDelay,
+      floodDelayMin: roundedFloodDelay,
+      rushHourLabel,
+    },
   };
 }
 
@@ -577,6 +672,14 @@ export function evaluateVehiclePassability(
 
 /**
  * Evaluates pedestrian walkability, wading delays, and safety advisories along a walking route.
+ * Standards:
+ * - Base urban pedestrian pace: 4.5 km/h (~13.3 min/km).
+ * - Rain slowdown: +10% to +35% for rain gear & poor visibility.
+ * - Flood resistance:
+ *   - 2-5 cm (puddles): +15% slowdown
+ *   - 6-15 cm (gutter/ankle): +70% slowdown (walking in boots)
+ *   - 16-25 cm (knee-deep): +220% slowdown (difficult wading)
+ *   - >25 cm: +400% slowdown (hazardous struggle / DO NOT WALK)
  */
 export function evaluateRouteWalkability(
   distanceKm: number,
@@ -585,16 +688,36 @@ export function evaluateRouteWalkability(
   segments: RouteSegmentData[]
 ): RouteWalkabilityData {
   let wadingDelayMin = 0;
+  let rainDelayMin = 0;
   let hasLeptospirosisRisk = false;
   let hasManholeHazard = false;
 
   segments.forEach((seg) => {
     const segDist = seg.segmentDistanceKm || 0.3;
-    // Expected normal walking duration for segment (~4.8 km/h):
-    const segBaseWalkMin = (segDist / 4.8) * 60;
-    const slowdownFactor = seg.walkSlowdownFactor || 1.0;
+    // Expected normal walking duration for segment at 4.5 km/h:
+    const segBaseWalkMin = (segDist / 4.5) * 60;
+    const slowdownFactor =
+      seg.walkSlowdownFactor ||
+      (seg.depthCm > 25
+        ? 5.0
+        : seg.depthCm >= 16
+        ? 3.2
+        : seg.depthCm >= 6
+        ? 1.7
+        : seg.depthCm >= 3
+        ? 1.15
+        : 1.0);
 
     wadingDelayMin += segBaseWalkMin * (slowdownFactor - 1.0);
+
+    // Weather impact on pedestrian travel
+    if (seg.rainMmHr >= 25) {
+      rainDelayMin += segBaseWalkMin * 0.35; // Heavy torrential downpour
+    } else if (seg.rainMmHr >= 10) {
+      rainDelayMin += segBaseWalkMin * 0.20; // Moderate rain
+    } else if (seg.rainMmHr >= 2) {
+      rainDelayMin += segBaseWalkMin * 0.10; // Light rain / drizzle
+    }
 
     if (seg.depthCm >= 10 || seg.rainMmHr >= 15) {
       hasLeptospirosisRisk = true;
@@ -604,8 +727,10 @@ export function evaluateRouteWalkability(
     }
   });
 
-  wadingDelayMin = Math.round(wadingDelayMin);
-  const adjustedDurationMin = Math.max(1, baseDurationMin + wadingDelayMin);
+  const roundedWadingDelay = Math.round(wadingDelayMin);
+  const roundedRainDelay = Math.round(rainDelayMin);
+  const adjustedDurationMin = Math.max(1, baseDurationMin + roundedWadingDelay + roundedRainDelay);
+  const averageSpeedKmH = Math.max(0.8, Number((distanceKm / (adjustedDurationMin / 60)).toFixed(1)));
 
   let category: WalkabilityCategory = "WALKABLE_CLEAR";
   let label = "100% Walkable & Safe";
@@ -655,12 +780,19 @@ export function evaluateRouteWalkability(
     isWalkable,
     baseDurationMin,
     adjustedDurationMin,
-    wadingDelayMin,
+    wadingDelayMin: roundedWadingDelay,
+    rainDelayMin: roundedRainDelay,
     maxWadingDepthCm: maxFloodDepthCm,
     hasLeptospirosisRisk,
     hasManholeHazard,
     recommendedGear,
     safetyTips,
+    breakdown: {
+      baseWalkMin: baseDurationMin,
+      wadingDelayMin: roundedWadingDelay,
+      rainDelayMin: roundedRainDelay,
+      averageSpeedKmH,
+    },
   };
 }
 
@@ -682,7 +814,7 @@ async function createFallbackRoute(
   }
 
   const distanceKm = Number(calculateHaversineDistance(lat1, lng1, lat2, lng2).toFixed(1));
-  const baseSpeed = mode === "walking" ? 4.8 : 30;
+  const baseSpeed = mode === "walking" ? 4.5 : 28;
   const baseDurationMin = Math.max(1, Math.round((distanceKm / baseSpeed) * 60));
 
   const segmented = await segmentPolylineWithFloodRisk(polyline, stations, mode);
@@ -727,4 +859,5 @@ async function createFallbackRoute(
     vehiclePassability,
   };
 }
+
 

@@ -4,14 +4,18 @@
 // Bahaba – Navigation: Route Planner & Directions Sidebar
 // ---------------------------------------------------------------------------
 
+import { useState } from "react";
+import Image from "next/image";
 import LocationAutocomplete from "@/components/LocationAutocomplete";
 import RouteOptionCard from "./RouteOptionCard";
+import StartTravelModal from "./StartTravelModal";
 import {
   type RouteOption,
   type TravelMode,
   type VehicleType,
   VEHICLE_CONFIGS,
 } from "@/lib/engine/routeSolver";
+import { getDeviceInfo, launchNavigation } from "@/lib/geo/navigationLauncher";
 
 export interface LocationItemState {
   id: string;
@@ -57,7 +61,29 @@ export default function RoutePlanner({
   loadingRoute,
   activeRoute,
 }: RoutePlannerProps) {
+  const [isStartTravelOpen, setIsStartTravelOpen] = useState(false);
   const isWalking = travelMode === "walking";
+
+  const handleStartTravel = () => {
+    if (!destLoc.coords) return;
+    const deviceInfo = getDeviceInfo();
+    if (deviceInfo.isMobile) {
+      setIsStartTravelOpen(true);
+    } else {
+      // Desktop Web: Direct 1-click launch to Google Maps navigation
+      launchNavigation(
+        "google",
+        {
+          origin: originLoc.coords || undefined,
+          originName: originLoc.name || undefined,
+          destination: destLoc.coords,
+          destinationName: destLoc.name || undefined,
+          mode: travelMode,
+        },
+        deviceInfo
+      );
+    }
+  };
 
   return (
     <div
@@ -216,7 +242,7 @@ export default function RoutePlanner({
                 <>
                   {/* Live Traffic Card */}
                   {activeRoute.traffic && (
-                    <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                    <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs">🚦</span>
@@ -233,17 +259,43 @@ export default function RoutePlanner({
                           {activeRoute.traffic.label}
                         </span>
                       </div>
+
                       <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-0.5 border-t border-slate-800/60">
                         <span>
-                          Speed: <strong className="text-slate-200">{activeRoute.traffic.averageSpeedKmH} km/h</strong>
+                          Avg Speed: <strong className="text-slate-200">{activeRoute.traffic.averageSpeedKmH} km/h</strong>
                         </span>
                         <span>
-                          Delay:{" "}
+                          Congestion Delay:{" "}
                           <strong className={activeRoute.traffic.delayMin > 0 ? "text-amber-400" : "text-emerald-400"}>
-                            +{activeRoute.traffic.delayMin} min
+                            {activeRoute.traffic.delayMin > 0 ? `+${activeRoute.traffic.delayMin} min` : "None (Clear)"}
                           </strong>
                         </span>
                       </div>
+
+                      {/* Traffic Delay Breakdown Chips */}
+                      {activeRoute.traffic.breakdown && activeRoute.traffic.delayMin > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[9px] font-mono">
+                          {activeRoute.traffic.breakdown.rushHourDelayMin > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                              🕒 Rush Hour: +{activeRoute.traffic.breakdown.rushHourDelayMin}m
+                            </span>
+                          )}
+                          {activeRoute.traffic.breakdown.weatherDelayMin > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                              🌧️ Rain Delay: +{activeRoute.traffic.breakdown.weatherDelayMin}m
+                            </span>
+                          )}
+                          {activeRoute.traffic.breakdown.floodDelayMin > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                              🌊 Flood Bottleneck: +{activeRoute.traffic.breakdown.floodDelayMin}m
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      <p className="text-[9.5px] text-slate-400 leading-snug">
+                        {activeRoute.traffic.description}
+                      </p>
                     </div>
                   )}
 
@@ -280,7 +332,9 @@ export default function RoutePlanner({
                         <div>
                           <span className="text-[11px] font-bold text-slate-200 block">Walkability Score</span>
                           <span className="text-[9px] text-slate-400 font-mono">
-                            {activeRoute.baseDurationMin}m base + {activeRoute.walkability.wadingDelayMin}m wading
+                            {activeRoute.baseDurationMin}m walk pace
+                            {activeRoute.walkability.wadingDelayMin > 0 && ` + ${activeRoute.walkability.wadingDelayMin}m wading`}
+                            {(activeRoute.walkability.rainDelayMin ?? 0) > 0 && ` + ${activeRoute.walkability.rainDelayMin}m weather`}
                           </span>
                         </div>
                       </div>
@@ -295,6 +349,21 @@ export default function RoutePlanner({
                         {activeRoute.walkability.score}/100 • {activeRoute.walkability.label}
                       </span>
                     </div>
+
+                    {/* Walking Gear Suggestions */}
+                    {activeRoute.walkability.recommendedGear && activeRoute.walkability.recommendedGear.length > 0 && (
+                      <div className="flex items-center gap-1 flex-wrap text-[9px]">
+                        <span className="text-slate-400 font-mono">Gear:</span>
+                        {activeRoute.walkability.recommendedGear.map((gear, idx) => (
+                          <span
+                            key={idx}
+                            className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300"
+                          >
+                            {gear}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     {activeRoute.walkability.safetyTips.length > 0 && (
                       <div className="p-2 rounded-lg bg-amber-950/30 border border-amber-800/40 text-[10px] space-y-1 text-amber-200">
@@ -344,34 +413,97 @@ export default function RoutePlanner({
           )}
         </div>
 
-        {/* Active Route Quick Summary Footer inside Sidebar */}
+        {/* Active Route Quick Summary & Start Travel Footer */}
         {activeRoute && (
-          <div className="p-3 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between gap-2 flex-shrink-0">
-            <div className="min-w-0 flex-1">
-              <strong className="text-white text-xs block font-bold truncate">
-                {activeRoute.summary}
-              </strong>
-              <span className="text-slate-400 text-[10px] block font-mono truncate">
-                {activeRoute.distanceKm} km • {activeRoute.durationMin}m • Flooded: {activeRoute.totalFloodedKm} km
+          <div className="p-3 bg-slate-950/95 border-t border-slate-800/80 space-y-2 flex-shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <strong className="text-white text-xs block font-bold truncate">
+                  {activeRoute.summary}
+                </strong>
+                <span className="text-slate-400 text-[10px] block font-mono truncate">
+                  {activeRoute.distanceKm} km • {activeRoute.durationMin}m • Flooded: {activeRoute.totalFloodedKm} km
+                </span>
+              </div>
+
+              <span
+                className={`font-black text-[10px] px-2 py-0.5 rounded-full border truncate flex-shrink-0 ${
+                  activeRoute.overallStatus === "SAFE"
+                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                    : activeRoute.overallStatus === "CAUTION"
+                      ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                      : activeRoute.overallStatus === "HIGH_RISK"
+                        ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                        : "bg-rose-500/20 text-rose-400 border-rose-500/40"
+                }`}
+              >
+                {isWalking
+                  ? activeRoute.walkability?.label || (activeRoute.overallStatus === "SAFE" ? "WALKABLE" : "WADING")
+                  : activeRoute.overallStatus}
               </span>
             </div>
 
-            <span
-              className={`font-black text-[10px] px-2 py-0.5 rounded-full border truncate flex-shrink-0 ${
-                activeRoute.overallStatus === "SAFE"
-                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                  : activeRoute.overallStatus === "CAUTION"
-                    ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
-                    : activeRoute.overallStatus === "HIGH_RISK"
-                      ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
-                      : "bg-rose-500/20 text-rose-400 border-rose-500/40"
-              }`}
-            >
-              {isWalking
-                ? activeRoute.walkability?.label || (activeRoute.overallStatus === "SAFE" ? "WALKABLE" : "WADING")
-                : activeRoute.overallStatus}
-            </span>
+            {/* Start Travel Action Button */}
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <button
+                onClick={handleStartTravel}
+                className={`flex-1 py-2.5 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98] ${
+                  isWalking
+                    ? "bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 text-white shadow-cyan-950/50"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-950/50"
+                }`}
+              >
+                <Image
+                  src="/gmaps.svg"
+                  alt="Google Maps"
+                  width={18}
+                  height={18}
+                  className="w-4 h-4 object-contain brightness-110 drop-shadow"
+                />
+                <span>Start Travel</span>
+                <span className="text-[10px] font-normal opacity-90">
+                  {isWalking ? "(Walking)" : "(Driving)"}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setIsStartTravelOpen(true)}
+                title="Choose Navigation App (Google Maps, Apple Maps, Waze)"
+                aria-label="Choose Navigation App"
+                className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors flex items-center justify-center gap-1 text-xs flex-shrink-0"
+              >
+                <Image
+                  src="/applemaps.svg"
+                  alt="Apple Maps"
+                  width={14}
+                  height={14}
+                  className="w-3.5 h-3.5 object-contain"
+                />
+                <Image
+                  src="/waze.svg"
+                  alt="Waze"
+                  width={14}
+                  height={14}
+                  className="w-3.5 h-3.5 object-contain"
+                />
+              </button>
+            </div>
           </div>
+        )}
+
+        {/* Start Travel Multi-App Modal */}
+        {destLoc.coords && (
+          <StartTravelModal
+            isOpen={isStartTravelOpen}
+            onClose={() => setIsStartTravelOpen(false)}
+            params={{
+              origin: originLoc.coords || undefined,
+              originName: originLoc.name || undefined,
+              destination: destLoc.coords,
+              destinationName: destLoc.name || undefined,
+              mode: travelMode,
+            }}
+          />
         )}
       </div>
     </div>

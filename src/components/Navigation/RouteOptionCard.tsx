@@ -80,29 +80,43 @@ export default function RouteOptionCard({
         </div>
 
         {!isWalking && option.traffic && (
-          <span
-            className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-            style={{
-              backgroundColor: `${option.traffic.color}15`,
-              color: option.traffic.color,
-              border: `1px solid ${option.traffic.color}40`,
-            }}
-          >
-            🚦 {option.traffic.label}
-          </span>
+          <div className="flex items-center gap-1">
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{
+                backgroundColor: `${option.traffic.color}15`,
+                color: option.traffic.color,
+                border: `1px solid ${option.traffic.color}40`,
+              }}
+            >
+              🚦 {option.traffic.label}
+            </span>
+            {option.traffic.delayMin > 0 && (
+              <span className="text-[9px] font-semibold text-amber-400">
+                (+{option.traffic.delayMin}m delay)
+              </span>
+            )}
+          </div>
         )}
 
         {isWalking && option.walkability && (
-          <span
-            className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-            style={{
-              backgroundColor: `${option.walkability.color}15`,
-              color: option.walkability.color,
-              border: `1px solid ${option.walkability.color}40`,
-            }}
-          >
-            🥾 {option.walkability.score}/100
-          </span>
+          <div className="flex items-center gap-1">
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{
+                backgroundColor: `${option.walkability.color}15`,
+                color: option.walkability.color,
+                border: `1px solid ${option.walkability.color}40`,
+              }}
+            >
+              🥾 {option.walkability.score}/100
+            </span>
+            {option.walkability.wadingDelayMin > 0 && (
+              <span className="text-[9px] font-semibold text-amber-400">
+                (+{option.walkability.wadingDelayMin}m wade)
+              </span>
+            )}
+          </div>
         )}
       </div>
     </div>

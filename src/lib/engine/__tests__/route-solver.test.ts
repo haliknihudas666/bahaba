@@ -54,7 +54,7 @@ const clearSegments: RouteSegmentData[] = [
     rain24hMm: 0,
     severity: "NORMAL",
     color: "#2563eb",
-    depthCm: 2,
+    depthCm: 0,
     depthCategory: "Normal / Clear",
     passableVehicles: ["All Vehicles"],
     hazardScore: 10,
@@ -63,11 +63,21 @@ const clearSegments: RouteSegmentData[] = [
     segmentDistanceKm: 1.0,
   },
 ];
-const clearTraffic = calculateRouteTraffic(3.0, 6, 2, clearSegments);
-assert(clearTraffic.level === "SMOOTH", "0-2cm flood maps to SMOOTH traffic");
-assert(clearTraffic.delayMin === 0, "No traffic delay on clear dry road");
-assert(clearTraffic.averageSpeedKmH >= 25, "Average speed remains standard for smooth traffic");
 
+// Test late night off-peak time (23:00 Manila time / 15:00 UTC)
+const offPeakDate = new Date("2026-08-21T15:00:00Z");
+const clearTrafficOffPeak = calculateRouteTraffic(3.0, 6, 0, clearSegments, offPeakDate);
+assert(clearTrafficOffPeak.level === "SMOOTH", "Off-peak clear road maps to SMOOTH traffic");
+assert(clearTrafficOffPeak.delayMin === 0, "No rush hour delay during late night off-peak");
+assert(clearTrafficOffPeak.averageSpeedKmH >= 25, "Average speed remains fast for smooth traffic");
+
+// Test evening peak rush hour (18:00 Manila time / 10:00 UTC)
+const rushHourDate = new Date("2026-08-21T10:00:00Z");
+const rushHourTraffic = calculateRouteTraffic(5.0, 11, 0, clearSegments, rushHourDate);
+assert(rushHourTraffic.delayMin > 0, "Evening rush hour triggers congestion delay");
+assert(rushHourTraffic.label.includes("Rush Hour"), "Traffic label identifies rush hour period");
+
+// Test flooded segment with heavy rain and bottlenecks
 const floodedSegments: RouteSegmentData[] = [
   {
     coordinates: [[14.6, 121.0], [14.61, 121.01]],
@@ -85,13 +95,14 @@ const floodedSegments: RouteSegmentData[] = [
     segmentDistanceKm: 2.0,
   },
 ];
-const congestedTraffic = calculateRouteTraffic(5.0, 10, 22, floodedSegments);
+const congestedTraffic = calculateRouteTraffic(5.0, 11, 22, floodedSegments, rushHourDate);
 assert(congestedTraffic.level === "HEAVY" || congestedTraffic.level === "STANDSTILL", "22cm flood produces HEAVY or STANDSTILL traffic");
-assert(congestedTraffic.delayMin > 0, "Flooded segments introduce traffic delay");
+assert(congestedTraffic.delayMin > 5, "Flooded segments and rain introduce significant traffic delay");
 assert(congestedTraffic.averageSpeedKmH < 20, "Average speed is reduced due to flooded crawl speed");
+assert(congestedTraffic.breakdown?.floodDelayMin !== undefined && congestedTraffic.breakdown.floodDelayMin > 0, "Breakdown includes flood bottleneck delay");
 
-// 3. Pedestrian Walkability & Wading Assessment Tests
-console.log("\n── Test 3: Pedestrian Walkability & Flood Wading ──");
+// 3. Pedestrian Walkability & Realistic Walking Assessment Tests
+console.log("\n── Test 3: Pedestrian Walkability & Realistic Walking Duration ──");
 const dryWalkSegments: RouteSegmentData[] = [
   {
     coordinates: [[14.6, 121.0], [14.61, 121.01]],
@@ -106,14 +117,20 @@ const dryWalkSegments: RouteSegmentData[] = [
     hazardScore: 5,
     nearestStationName: "Test Station",
     nearestStationDistanceKm: 2,
-    segmentDistanceKm: 1.0,
+    segmentDistanceKm: 2.7,
     walkSlowdownFactor: 1.0,
   },
 ];
-const dryWalk = evaluateRouteWalkability(1.0, 12, 1, dryWalkSegments);
+
+// 2.7 km walk at realistic ~4.5 km/h base speed
+const realisticBaseWalkMin = Math.round((2.7 / 4.5) * 60); // 36 minutes
+assert(realisticBaseWalkMin === 36, "2.7 km walk corresponds to 36 mins realistic pedestrian time (not 5 mins driving time)");
+
+const dryWalk = evaluateRouteWalkability(2.7, realisticBaseWalkMin, 1, dryWalkSegments);
 assert(dryWalk.isWalkable === true, "Dry road is 100% walkable");
 assert(dryWalk.category === "WALKABLE_CLEAR", "Dry road maps to WALKABLE_CLEAR");
 assert(dryWalk.score >= 90, "Dry road has walkability score >= 90");
+assert(dryWalk.adjustedDurationMin === 36, "Adjusted duration matches realistic 36 mins for 2.7 km clear walk");
 assert(dryWalk.wadingDelayMin === 0, "No wading delay on dry path");
 
 const kneeDeepSegments: RouteSegmentData[] = [
@@ -131,14 +148,15 @@ const kneeDeepSegments: RouteSegmentData[] = [
     nearestStationName: "Test Station",
     nearestStationDistanceKm: 0.3,
     segmentDistanceKm: 1.0,
-    walkSlowdownFactor: 2.4,
+    walkSlowdownFactor: 3.2,
   },
 ];
-const kneeDeepWalk = evaluateRouteWalkability(1.0, 12, 20, kneeDeepSegments);
+const kneeDeepWalk = evaluateRouteWalkability(1.0, 13, 20, kneeDeepSegments);
 assert(kneeDeepWalk.category === "HAZARDOUS_WADING", "20cm depth maps to HAZARDOUS_WADING");
 assert(kneeDeepWalk.hasLeptospirosisRisk === true, "Leptospirosis alert triggered at 20cm flood");
 assert(kneeDeepWalk.hasManholeHazard === true, "Open manhole hazard triggered at 20cm flood");
 assert(kneeDeepWalk.wadingDelayMin > 0, "Wading resistance adds delay to pedestrian travel");
+assert(kneeDeepWalk.adjustedDurationMin > 13, "Adjusted walking duration includes wading & weather delays");
 assert(kneeDeepWalk.recommendedGear.includes("High Rubber Boots (Bota)"), "High rubber boots recommended for wading");
 
 const waistDeepSegments: RouteSegmentData[] = [
@@ -156,10 +174,10 @@ const waistDeepSegments: RouteSegmentData[] = [
     nearestStationName: "River Station",
     nearestStationDistanceKm: 0.2,
     segmentDistanceKm: 1.0,
-    walkSlowdownFactor: 4.0,
+    walkSlowdownFactor: 5.0,
   },
 ];
-const waistDeepWalk = evaluateRouteWalkability(1.0, 12, 38, waistDeepSegments);
+const waistDeepWalk = evaluateRouteWalkability(1.0, 13, 38, waistDeepSegments);
 assert(waistDeepWalk.isWalkable === false, "38cm depth is marked as NOT walkable / dangerous");
 assert(waistDeepWalk.category === "IMPASSABLE_DANGEROUS", "38cm depth maps to IMPASSABLE_DANGEROUS");
 assert(waistDeepWalk.score <= 20, "Critical flood depth yields very low walkability score");
@@ -167,3 +185,4 @@ assert(waistDeepWalk.score <= 20, "Critical flood depth yields very low walkabil
 console.log("\n════════════════════════════════════════════════════════════");
 console.log("  All Route Solver & Walkability Tests Passed Successfully! ");
 console.log("════════════════════════════════════════════════════════════\n");
+
