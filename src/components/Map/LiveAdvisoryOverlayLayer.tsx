@@ -50,6 +50,8 @@ export default function LiveAdvisoryOverlayLayer({
   const onSelectAdvisoryRef = useRef(onSelectAdvisory);
   onSelectAdvisoryRef.current = onSelectAdvisory;
 
+  const lastDirectClickedIdRef = useRef<string | null>(null);
+
   // 1. Initialize Layer Group and render markers when advisories list changes
   useEffect(() => {
     const L = (window as any).L;
@@ -158,6 +160,7 @@ export default function LiveAdvisoryOverlayLayer({
         const marker = L.marker([lat, lng], { icon: customIcon, keyboard: false })
           .bindPopup(popupContent, { maxWidth: 260 })
           .on("click", () => {
+            lastDirectClickedIdRef.current = advisory.id;
             onSelectAdvisoryRef.current?.(advisory);
           });
 
@@ -185,18 +188,26 @@ export default function LiveAdvisoryOverlayLayer({
     };
   }, [map]);
 
-  // 2. Focus / flyTo when selectedAdvisory changes
+  // 2. Focus when selectedAdvisory changes from external UI (avoid double triggering on direct map clicks)
   useEffect(() => {
     if (!selectedAdvisory || !map || !mapLoaded || !selectedAdvisory.coordinates) return;
+
+    if (lastDirectClickedIdRef.current === selectedAdvisory.id) {
+      lastDirectClickedIdRef.current = null;
+      return;
+    }
+
     const { lat, lng } = selectedAdvisory.coordinates;
     try {
-      map.flyTo([lat, lng], 15, { animate: true, duration: 0.9 });
+      const currentZoom = map.getZoom ? map.getZoom() : 13;
+      const targetZoom = Math.max(currentZoom, 14);
+      map.setView([lat, lng], targetZoom, { animate: true });
       const marker = markersMapRef.current.get(selectedAdvisory.id);
       if (marker) {
         marker.openPopup();
       }
     } catch (err) {
-      console.warn("[LiveAdvisoryOverlayLayer flyTo error]", err);
+      console.warn("[LiveAdvisoryOverlayLayer setView error]", err);
     }
   }, [selectedAdvisory, map, mapLoaded]);
 

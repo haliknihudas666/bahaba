@@ -98,29 +98,25 @@ export default function PMTilesFloodRoadsLayer({
     };
   }, []);
 
-  // Update dimmed ref and redraw when dimming state changes
+  // Update dimmed ref and redraw only when dimming state actually changes
   useEffect(() => {
-    dimmedRef.current = dimmed;
-    if (layerRef.current && typeof layerRef.current.redraw === "function") {
-      layerRef.current.redraw();
+    if (dimmedRef.current !== dimmed) {
+      dimmedRef.current = dimmed;
+      if (layerRef.current && typeof layerRef.current.redraw === "function") {
+        layerRef.current.redraw();
+      }
     }
   }, [dimmed]);
 
-  // Update stations ref and redraw only if station count or high-risk count changed
+  // Update stations ref and redraw only when station data changes
   useEffect(() => {
     stationsRef.current = stations;
-    if (layerRef.current && typeof layerRef.current.redraw === "function") {
-      layerRef.current.redraw();
-    }
   }, [stations]);
 
-  // Keep rainfall in ref and trigger redraw when weather updates
+  // Keep rainfall in ref and trigger debounced redraw when weather updates
   useEffect(() => {
     rainRateRef.current = rainRate;
     rain24hRef.current = rain24h;
-    if (layerRef.current && typeof layerRef.current.redraw === "function") {
-      layerRef.current.redraw();
-    }
   }, [rainRate, rain24h]);
 
   // 1. Fetch live Open-Meteo rainfall for current map center (debounced & distance-throttled)
@@ -306,10 +302,10 @@ export default function PMTilesFloodRoadsLayer({
             },
           ],
           labelRules: [
-            // High-Legibility Crisp Road Name Labels (street-level zoom only to save labeler index compute)
+            // High-Legibility Road Name Labels (street-level zoom >= 14 to save heavy geometry placement calculations)
             {
               dataLayer: "transportation_name",
-              minzoom: 13,
+              minzoom: 14,
               symbolizer: new protomapsL.LineLabelSymbolizer({
                 fill: "#f8fafc",
                 font: "600 11px system-ui, -apple-system, sans-serif",
@@ -319,7 +315,7 @@ export default function PMTilesFloodRoadsLayer({
             },
           ],
           maxDataZoom: 14,
-          tileDelay: 0,
+          tileDelay: 5,
         });
 
         // Intercept renderTile to calculate flood estimation ONCE per tile before canvas painting
