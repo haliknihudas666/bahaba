@@ -127,7 +127,7 @@ export function trackStationSelected(params: {
   stationName: string;
   waterLevel?: number;
   riskLevel?: string;
-  source?: "map" | "table" | "finder";
+  source?: "map" | "table" | "finder" | "telemetry-panel";
 }) {
   logAnalyticsEvent("select_station", {
     station_id: params.stationId,

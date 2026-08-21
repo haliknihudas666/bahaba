@@ -14,7 +14,6 @@ interface MapLegendProps {
   showHazard: boolean;
   onToggleHazard: () => void;
   onRecenter: () => void;
-  onOpenNearestFinder: () => void;
 }
 
 /**
@@ -83,7 +82,6 @@ export default function MapLegend({
   showHazard,
   onToggleHazard,
   onRecenter,
-  onOpenNearestFinder,
 }: MapLegendProps) {
   const [activePopover, setActivePopover] = useState<"legend" | "overlays" | null>(null);
   const isWalking = travelMode === "walking";
@@ -280,17 +278,6 @@ export default function MapLegend({
           <span>🧭</span>
           <span className="hidden sm:inline">Center Metro Manila</span>
           <span className="sm:hidden">Center</span>
-        </button>
-
-        {/* Quick Nearest Station Finder Trigger */}
-        <button
-          onClick={onOpenNearestFinder}
-          className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 text-[11px] font-bold transition-all active:scale-95"
-          title="Find nearest telemetry station to your location"
-        >
-          <span>📍</span>
-          <span className="hidden sm:inline">Nearest Station</span>
-          <span className="sm:hidden">Nearest</span>
         </button>
       </div>
     </div>

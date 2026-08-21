@@ -10,8 +10,9 @@ import { useLiveFloodStatus } from "@/hooks/useLiveFloodStatus";
 import { useLiveAdvisories } from "@/hooks/useLiveAdvisories";
 import RoadFloodMap from "@/components/Map/RoadFloodMap";
 import RoutePlanner, { type LocationItemState } from "@/components/Navigation/RoutePlanner";
-import BottomDrawer, { type DrawerTabType } from "@/components/Drawer/BottomDrawer";
-import MapHeaderControls from "@/components/Layout/MapHeaderControls";
+import DataTableModal, { type DataTableTabType } from "@/components/DataTableModal";
+import MapHeaderControls, { type TelemetryMetrics, type HighRiskStationSummary } from "@/components/Layout/MapHeaderControls";
+import TelemetrySidePanel from "@/components/Layout/TelemetrySidePanel";
 import MapLegend from "@/components/Layout/MapLegend";
 import ShareModal from "@/components/ShareModal";
 import DonationModal from "@/components/DonationModal";
@@ -62,15 +63,17 @@ export default function HomePage() {
   const [isAdvisoryModalOpen, setIsAdvisoryModalOpen] = useState<boolean>(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [isTelemetryOpen, setIsTelemetryOpen] = useState<boolean>(true);
+  const [isTableModalOpen, setIsTableModalOpen] = useState<boolean>(false);
   const [recenterTrigger, setRecenterTrigger] = useState<number>(0);
   const [showFloodHeatmap, setShowFloodHeatmap] = useState<boolean>(true);
   const [showFloodHazard, setShowFloodHazard] = useState<boolean>(false);
 
-  // Close flood safe directions sidebar by default on mobile devices
+  // Close flood safe directions sidebar & telemetry panel by default on mobile devices
   useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setIsSidebarOpen(false);
+      setIsTelemetryOpen(false);
     }
   }, []);
 
@@ -78,8 +81,8 @@ export default function HomePage() {
   const [travelMode, setTravelMode] = useState<TravelMode>("driving");
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>("all");
 
-  // Drawer table tab state
-  const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTabType>("station-telemetry");
+  // Data table tab state
+  const [activeTableTab, setActiveTableTab] = useState<DataTableTabType>("station-telemetry");
 
   // Location state for Point A (Origin) and Point B (Destination)
   const [originLoc, setOriginLoc] = useState<LocationItemState>({
@@ -119,31 +122,67 @@ export default function HomePage() {
   };
 
   // Overall telemetry summary metrics
-  const metrics = useMemo(() => {
+  const metrics: TelemetryMetrics = useMemo(() => {
     const total = activeStations.length;
-    const highRisk = activeStations.filter(
-      (s) => s.riskLevel === "CRITICAL" || s.riskLevel === "ALARM" || s.riskLevel === "ALERT"
-    ).length;
+    const highRiskStations: HighRiskStationSummary[] = [];
 
     let peakWater = 0;
     let peakWaterStation = "N/A";
+    let peakWaterStationId: string | null = null;
+
     let maxRain1h = 0;
+    let maxRain1hStation = "N/A";
+    let maxRain1hStationId: string | null = null;
+
     let maxRain = 0;
+    let maxRainStation = "N/A";
+    let maxRainStationId: string | null = null;
 
     activeStations.forEach((s) => {
+      if (s.riskLevel === "CRITICAL" || s.riskLevel === "ALARM" || s.riskLevel === "ALERT") {
+        highRiskStations.push({
+          stationId: s.stationId,
+          stationName: s.stationName,
+          waterLevel: s.waterLevel,
+          riskLevel: s.riskLevel,
+          rain1h: s.rain1h,
+        });
+      }
+
       if (s.waterLevel > peakWater) {
         peakWater = s.waterLevel;
         peakWaterStation = s.stationName;
+        peakWaterStationId = s.stationId;
       }
       if (s.rain1h > maxRain1h) {
         maxRain1h = s.rain1h;
+        maxRain1hStation = s.stationName;
+        maxRain1hStationId = s.stationId;
       }
       if (s.rain24h > maxRain) {
         maxRain = s.rain24h;
+        maxRainStation = s.stationName;
+        maxRainStationId = s.stationId;
       }
     });
 
-    return { total, highRisk, peakWater, peakWaterStation, maxRain1h, maxRain };
+    // Sort high-risk stations by water level descending
+    highRiskStations.sort((a, b) => b.waterLevel - a.waterLevel);
+
+    return {
+      total,
+      highRisk: highRiskStations.length,
+      highRiskStations,
+      peakWater,
+      peakWaterStation,
+      peakWaterStationId,
+      maxRain1h,
+      maxRain1hStation,
+      maxRain1hStationId,
+      maxRain,
+      maxRainStation,
+      maxRainStationId,
+    };
   }, [activeStations]);
 
   // Formatted observation / sync timestamp
@@ -342,7 +381,7 @@ export default function HomePage() {
       estimatedDepthCm: road.estimatedDepthCm,
       hazardScore: road.hazardScore,
     });
-    setIsDrawerOpen(false);
+    setIsTableModalOpen(false);
   };
 
   // Focus Map First, let camera fly to the road, then Open Share Modal
@@ -354,7 +393,7 @@ export default function HomePage() {
       estimatedDepthCm: road.estimatedDepthCm,
       hazardScore: road.hazardScore,
     });
-    setIsDrawerOpen(false);
+    setIsTableModalOpen(false);
     setTimeout(() => {
       setIsShareModalOpen(true);
     }, 750);
@@ -394,9 +433,11 @@ export default function HomePage() {
         onOpenAdvisoryModal={() => setIsAdvisoryModalOpen(true)}
         onOpenAboutModal={() => setIsAboutModalOpen(true)}
         activeAdvisoryCount={activeFloodCount}
+        isTelemetryOpen={isTelemetryOpen}
+        onToggleTelemetry={() => setIsTelemetryOpen((prev) => !prev)}
         onOpenDrawer={() => {
-          setIsDrawerOpen(true);
-          trackTableTabSwitch(activeDrawerTab);
+          setIsTableModalOpen(true);
+          trackTableTabSwitch(activeTableTab);
         }}
       />
 
@@ -420,7 +461,40 @@ export default function HomePage() {
         activeRoute={activeRoute}
       />
 
-      {/* ── 4. FLOATING BUTTON TO RESTORE SIDEBAR (When Minimized) ────── */}
+      {/* ── 4. FLOATING RIGHT TELEMETRY & WEATHER SIDEBAR ──────────────── */}
+      <TelemetrySidePanel
+        isOpen={isTelemetryOpen}
+        onClose={() => setIsTelemetryOpen(false)}
+        metrics={metrics}
+        lastUpdatedFormatted={lastUpdatedFormatted}
+        syncing={syncing}
+        onSync={triggerTelemetrySync}
+        onOpenStationsTable={() => {
+          setActiveTableTab("station-telemetry");
+          setIsTableModalOpen(true);
+          trackTableTabSwitch("station-telemetry");
+        }}
+        onOpenRoadsTable={() => {
+          setActiveTableTab("road-predictions");
+          setIsTableModalOpen(true);
+          trackTableTabSwitch("road-predictions");
+        }}
+        onSelectStation={(id) => {
+          setSelectedStationId(id);
+          const st = activeStations.find((s) => s.stationId === id);
+          if (st) {
+            trackStationSelected({
+              stationId: st.stationId,
+              stationName: st.stationName,
+              waterLevel: st.waterLevel,
+              riskLevel: st.riskLevel,
+              source: "telemetry-panel",
+            });
+          }
+        }}
+      />
+
+      {/* ── 5. FLOATING BUTTON TO RESTORE DIRECTIONS (When Minimized) ─── */}
       {!isSidebarOpen && (
         <button
           onClick={() => setIsSidebarOpen(true)}
@@ -443,19 +517,15 @@ export default function HomePage() {
         showHazard={showFloodHazard}
         onToggleHazard={() => setShowFloodHazard((prev) => !prev)}
         onRecenter={handleRecenter}
-        onOpenNearestFinder={() => {
-          setActiveDrawerTab("nearest-finder");
-          setIsDrawerOpen(true);
-        }}
       />
 
-      {/* ── 6. SLIDE-UP TELEMETRY & DATA TABLES DRAWER ─────────────────── */}
-      <BottomDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        activeTab={activeDrawerTab}
+      {/* ── 6. HYDROLOGICAL TELEMETRY & MONITORED ROADS MODAL ─────────── */}
+      <DataTableModal
+        isOpen={isTableModalOpen}
+        onClose={() => setIsTableModalOpen(false)}
+        activeTab={activeTableTab}
         onTabChange={(tab) => {
-          setActiveDrawerTab(tab);
+          setActiveTableTab(tab);
           trackTableTabSwitch(tab);
         }}
         stations={activeStations}
@@ -472,13 +542,11 @@ export default function HomePage() {
               source: "table",
             });
           }
-          setIsDrawerOpen(false);
         }}
         roadEvaluations={roadEvaluations}
         selectedRoad={selectedRoadRisk}
         onSelectRoad={handleSelectRoad}
         onShareRoad={handleFocusAndShareRoad}
-        onSetUserLocation={setUserLocation}
       />
 
       {/* ── 7. SHARE REPORT MODAL ────────────────────────────────────── */}
