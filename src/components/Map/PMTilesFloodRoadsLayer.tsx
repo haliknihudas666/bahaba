@@ -309,21 +309,37 @@ export default function PMTilesFloodRoadsLayer({
           key: string,
           done: any
         ) {
-          const bbox = tile2bbox(coords.x, coords.y, coords.z);
-          const centLat = (bbox.minLat + bbox.maxLat) / 2;
-          const centLng = (bbox.minLng + bbox.maxLng) / 2;
+          try {
+            const maxCoord = Math.pow(2, coords.z);
+            if (coords.x < 0 || coords.x >= maxCoord || coords.y < 0 || coords.y >= maxCoord) {
+              if (typeof done === "function") done(null, canvas);
+              return;
+            }
 
-          // Calculate inundation once per tile (uses memoized cache in liveFloodGrid)
-          const estimate = estimateInundationAtLocation(
-            centLat,
-            centLng,
-            stationsRef.current,
-            rainRateRef.current,
-            rain24hRef.current
-          );
+            const bbox = tile2bbox(coords.x, coords.y, coords.z);
+            const centLat = (bbox.minLat + bbox.maxLat) / 2;
+            const centLng = (bbox.minLng + bbox.maxLng) / 2;
 
-          (canvas as any)._tileFloodEstimate = estimate;
-          return origRenderTile(coords, canvas, key, done);
+            // Calculate inundation once per tile (uses memoized cache in liveFloodGrid)
+            const estimate = estimateInundationAtLocation(
+              centLat,
+              centLng,
+              stationsRef.current,
+              rainRateRef.current,
+              rain24hRef.current
+            );
+
+            (canvas as any)._tileFloodEstimate = estimate;
+            const res = origRenderTile(coords, canvas, key, done);
+            if (res && typeof res.catch === "function") {
+              return res.catch((err: any) => {
+                if (typeof done === "function") done(null, canvas);
+              });
+            }
+            return res;
+          } catch {
+            if (typeof done === "function") done(null, canvas);
+          }
         };
 
         layerRef.current = layer;

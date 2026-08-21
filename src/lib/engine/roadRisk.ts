@@ -199,21 +199,46 @@ const FLUVIAL_OVERFLOW_MAX_BONUS_CM = 20;
  */
 const SSI_DECAY_RATE = 0.019;
 
+// ---------------------------------------------------------------------------
+// River Basin Identification Helper
+// ---------------------------------------------------------------------------
+
 /**
- * Evaluates road-level flood risk by matching a road LineString centroid to the
- * nearest PAGASA telemetry station and calculating predicted water depth
- * using a rainfall-primary model.
- *
- * River water levels only contribute to depth estimation for roads within
- * ~500m of a river gauge that has reached ALARM or CRITICAL level.
+ * Determines whether a given station is a River Basin water level/stage gauge.
+ */
+export function isRiverGaugeStation(st: LiveStation): boolean {
+  if (!st) return false;
+  const name = (st.stationName || "").toLowerCase();
+  const id = (st.stationId || "").toLowerCase();
+
+  return (
+    name.includes("river basin") ||
+    name.includes("water level") ||
+    name.includes(" wl ") ||
+    name.endsWith(" wl") ||
+    id.includes("riverbasin") ||
+    id.includes("water-level") ||
+    st.waterLevel > 0 ||
+    (st.waterRiskLevel !== undefined &&
+      st.waterRiskLevel !== "NORMAL" &&
+      st.waterRiskLevel !== "UNKNOWN")
+  );
+}
+
+/**
+ * Evaluates road-level flood risk by fusing:
+ *   1. Hyper-local district rainfall (Open-Meteo & Panahon AWS) for pluvial road pooling
+ *   2. Proximity to active River Basin water level gauges for fluvial overflow surge
  *
  * @param roadFeature - GeoJSON LineString road feature
- * @param stations - Array of active PAGASA station telemetry records
+ * @param stations - Array of active PAGASA/Panahon station telemetry records
+ * @param districtRainfall - Optional hyper-local Open-Meteo district precipitation
  * @returns RoadRiskResult containing severity, depth, hex color, line weight, and popup metadata
  */
 export function calculateRoadRisk(
   roadFeature: GeoJSONLineStringFeature,
-  stations: LiveStation[]
+  stations: LiveStation[],
+  districtRainfall?: { currentRainMmHr: number; rain24hMm: number }
 ): RoadRiskResult {
   const roadName = roadFeature.properties?.name || roadFeature.properties?.highway || "Unnamed Road";
   const roadElevation = roadFeature.properties?.elevation ?? 4.0; // Default 4.0m EL.m for low-lying urban areas
@@ -222,7 +247,7 @@ export function calculateRoadRisk(
   const centroid = calculateLineCentroid(roadFeature.geometry.coordinates);
   const [roadLat, roadLng] = centroid;
 
-  // 2. Find Nearest PAGASA Telemetry Station
+  // 2. Find Nearest Telemetry Station
   if (!stations || stations.length === 0) {
     return createFallbackRiskResult(
       roadName,
@@ -238,30 +263,46 @@ export function calculateRoadRisk(
   let nearestStation: LiveStation = stations[0];
   let minDistanceKm = Infinity;
 
-  stations.forEach((st) => {
-    if (!st.latitude || !st.longitude) return;
+  // Track nearest river station separately
+  let nearestRiverStation: LiveStation | null = null;
+  let minRiverDistanceKm = Infinity;
+
+  for (const st of stations) {
+    if (!st.latitude || !st.longitude) continue;
     const dist = calculateHaversineDistance(roadLat, roadLng, st.latitude, st.longitude);
     if (dist < minDistanceKm) {
       minDistanceKm = dist;
       nearestStation = st;
     }
-  });
+
+    if (isRiverGaugeStation(st) && dist < minRiverDistanceKm) {
+      minRiverDistanceKm = dist;
+      nearestRiverStation = st;
+    }
+  }
 
   // 3. Proximity Distance Decay Factor for rainfall data
   const distanceWeight = Math.exp(-minDistanceKm / 6.0);
 
-  // 4. Extract Telemetry Signals from Nearest Station
+  // 4. Extract Telemetry Signals from Nearest Station + Optional District Rainfall
   const stationRain1h = nearestStation.rain1h ?? 0;
   const stationRain24h = nearestStation.rain24h ?? 0;
   const stationRain10m = nearestStation.rain10m ?? 0;
-  const stationWaterDelta1h = nearestStation.waterLevelDelta1h ?? 0;
+
+  // Fuse Open-Meteo hyper-local district rainfall with ground-truth AWS station telemetry
+  const effectiveRain1h = districtRainfall
+    ? Math.max(districtRainfall.currentRainMmHr, stationRain1h * distanceWeight)
+    : stationRain1h * distanceWeight;
+
+  const effectiveRain24h = districtRainfall
+    ? Math.max(districtRainfall.rain24hMm, stationRain24h)
+    : stationRain24h;
 
   // 5. Pluvial Depth Estimation (Rainfall-Driven)
-  const soilSaturationIndex = 1 - Math.exp(-SSI_DECAY_RATE * stationRain24h);
+  const soilSaturationIndex = 1 - Math.exp(-SSI_DECAY_RATE * effectiveRain24h);
   const effectiveDrainageMmHr =
     BASE_DRAINAGE_CAPACITY_MM_HR * (1 - soilSaturationIndex * 0.8);
 
-  const effectiveRain1h = stationRain1h * distanceWeight;
   const netRainfallExcessMm = Math.max(
     0,
     effectiveRain1h * URBAN_RUNOFF_COEFFICIENT - effectiveDrainageMmHr,
@@ -281,25 +322,29 @@ export function calculateRoadRisk(
   }
 
   // 6. Fluvial Overflow Component (River-only, Near-River Roads Only)
-  const isNearRiver = minDistanceKm <= RIVERBANK_ZONE_KM;
+  const isNearRiver =
+    minRiverDistanceKm <= RIVERBANK_ZONE_KM ||
+    (minDistanceKm <= RIVERBANK_ZONE_KM && isRiverGaugeStation(nearestStation));
+
   let fluvialBonusCm = 0;
 
-  if (isNearRiver) {
-    const stationRisk = nearestStation.riskLevel;
-    if (stationRisk === "CRITICAL") {
+  if (isNearRiver && nearestRiverStation) {
+    const riverRisk = nearestRiverStation.riskLevel;
+    if (riverRisk === "CRITICAL") {
       fluvialBonusCm = FLUVIAL_OVERFLOW_MAX_BONUS_CM;
-    } else if (stationRisk === "ALARM") {
+    } else if (riverRisk === "ALARM") {
       fluvialBonusCm = FLUVIAL_OVERFLOW_MAX_BONUS_CM * 0.5;
     }
     // Add water level surge contribution for near-river roads
-    const surgeCm = Math.max(0, stationWaterDelta1h) * 100 * 0.3;
+    const riverWaterDelta1h = nearestRiverStation.waterLevelDelta1h ?? 0;
+    const surgeCm = Math.max(0, riverWaterDelta1h) * 100 * 0.3;
     fluvialBonusCm += surgeCm;
   }
 
   const estimatedDepthCm = Math.round(Math.max(0, pluvialDepthCm + fluvialBonusCm));
 
   // 7. Calculate Hazard Score (0 - 100)
-  const rainScore = Math.min(1.0, stationRain1h / 30.0); // 30mm/hr ceiling
+  const rainScore = Math.min(1.0, effectiveRain1h / 30.0); // 30mm/hr ceiling
   const depthScore = Math.min(1.0, estimatedDepthCm / 50.0); // 50cm depth ceiling
   const ssiScore = soilSaturationIndex;
 

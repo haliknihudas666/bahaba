@@ -7,6 +7,7 @@ import {
   calculateHaversineDistance,
   classifySeverity,
   calculateRoadRisk,
+  isRiverGaugeStation,
   SEVERITY_RULES,
   type GeoJSONLineStringFeature,
 } from "../roadRisk";
@@ -191,6 +192,62 @@ function runRoadRiskTests() {
   assert(
     nationalRisk.region === "Region III (Central Luzon)",
     `Propagates region tag (${nationalRisk.region})`
+  );
+
+  // Test 7: River Basin Gauge Identification & District Rainfall Fusion
+  const mockRiverStation: LiveStation = {
+    stationId: "panahon-pampanga-wl-sulipan",
+    stationName: "Sulipan (Water Level)",
+    latitude: 14.9392,
+    longitude: 120.7608,
+    geohash: "",
+    rain10m: 0,
+    rain1h: 0,
+    rain24h: 0,
+    waterLevel: 5.8,
+    waterLevelDelta1h: 0.3,
+    waterRiskLevel: "ALARM",
+    rainRiskLevel: "NORMAL",
+    riskLevel: "ALARM",
+    lastUpdated: new Date(),
+  };
+
+  const mockAwsStation: LiveStation = {
+    stationId: "panahon-qc-science-garden",
+    stationName: "Science Garden, Quezon City",
+    latitude: 14.6451,
+    longitude: 121.0442,
+    geohash: "",
+    rain10m: 0,
+    rain1h: 2.0,
+    rain24h: 10.0,
+    waterLevel: 0,
+    waterLevelDelta1h: 0,
+    waterRiskLevel: "NORMAL",
+    rainRiskLevel: "NORMAL",
+    riskLevel: "NORMAL",
+    lastUpdated: new Date(),
+  };
+
+  assert(
+    isRiverGaugeStation(mockRiverStation) === true,
+    `Identifies River Basin water level station correctly`
+  );
+  assert(
+    isRiverGaugeStation(mockAwsStation) === false,
+    `Identifies AWS weather station as non-riverbasin correctly`
+  );
+
+  // Test district rainfall override
+  const districtRainfallTest = calculateRoadRisk(
+    sampleLineString,
+    [mockAwsStation, mockRiverStation],
+    { currentRainMmHr: 45.0, rain24hMm: 120.0 }
+  );
+
+  assert(
+    districtRainfallTest.estimatedDepthCm > 5,
+    `Open-Meteo district rainfall (45mm/hr) elevates pluvial flood depth to ${districtRainfallTest.estimatedDepthCm} cm`
   );
 
   console.log("\n✅ All Spatial Risk Matcher Unit Tests Passed Successfully!\n");

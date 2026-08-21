@@ -6,11 +6,18 @@ export { extractFeatures, calculateFloodRisk } from "./heuristics";
 export { predictFloodRisk, getSession, resetSession } from "./inference";
 export {
   calculateRoadRisk,
+  isRiverGaugeStation,
   calculateLineCentroid,
   calculateHaversineDistance,
   classifySeverity,
   SEVERITY_RULES,
 } from "./roadRisk";
+
+export {
+  fetchDistrictRainfall,
+  batchFetchDistrictRainfall,
+  type DistrictRainfall,
+} from "@/lib/geo/meteo-rainfall";
 
 export type {
   FloodEstimation,
