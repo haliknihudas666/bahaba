@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // Bahaba – Standalone Advisory Scraper Worker
-// Scrapes @MMDA, @NDRRMC_OpCen, & @dost_pagasa via Playwright & saves to Firestore
+// Scrapes @MMDA, @NDRRMC_OpCen, & @dost_pagasa via Playwright & saves to MongoDB
 // ---------------------------------------------------------------------------
 
 import { chromium, type Browser } from "playwright";
-import admin from "firebase-admin";
+import { MongoClient, type Db } from "mongodb";
 import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
@@ -15,33 +15,33 @@ import { parseAdvisoryPost, isWeatherOrFloodRelated, type RawTweetInput } from "
 dotenv.config({ path: path.resolve(__dirname, "../../.env.local") });
 dotenv.config();
 
-// 1. Initialize Firebase Admin
-if (!admin.apps.length) {
-  const rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  let credential = admin.credential.applicationDefault();
+// 1. Initialize MongoDB Client Singleton
+const mongoUri = process.env.MONGODB_URI;
+const mongoDbName = process.env.MONGODB_DB || "bahaba";
 
-  if (rawKey) {
+let mongoClient: MongoClient | null = null;
+let mongoDb: Db | null = null;
+
+async function getDatabase(): Promise<Db> {
+  if (!mongoDb) {
+    if (!mongoUri) {
+      throw new Error("[MongoDB] MONGODB_URI environment variable is not defined in .env.local or .env");
+    }
+    mongoClient = new MongoClient(mongoUri);
+    await mongoClient.connect();
+    mongoDb = mongoClient.db(mongoDbName);
+
+    // Ensure helpful indexes exist
     try {
-      const jsonString = rawKey.startsWith("{")
-        ? rawKey
-        : Buffer.from(rawKey, "base64").toString("utf-8");
-      const serviceAccount = JSON.parse(jsonString);
-      credential = admin.credential.cert(serviceAccount);
-    } catch (e: any) {
-      console.warn("[Firebase] Could not parse service account JSON, falling back to projectId:", e.message);
+      await mongoDb.collection("advisories").createIndex({ publishedAt: -1 });
+      await mongoDb.collection("advisories").createIndex({ id: 1 }, { unique: true });
+      await mongoDb.collection("advisories").createIndex({ isFloodReport: 1, status: 1 });
+    } catch {
+      // index already exists or non-fatal
     }
   }
-
-  admin.initializeApp({
-    credential,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  });
+  return mongoDb;
 }
-
-const db = admin.firestore();
-try {
-  db.settings({ ignoreUndefinedProperties: true });
-} catch { }
 
 // Government accounts — scrape profiles directly, keep all posts
 const GOV_HANDLES = ["MMDA", "NDRRMC_OpCen", "dost_pagasa"];
@@ -57,6 +57,35 @@ function buildNewsSearchUrl(handle: string): string {
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // Scrape every 5 minutes
 const AUTH_FILE = path.resolve(__dirname, "x-auth.json");
+
+// In-memory cache of known advisory hashes to avoid stressing MongoDB with duplicate bulk writes
+const knownPostHashes = new Map<string, string>();
+let isCacheSeeded = false;
+
+function hashAdvisory(advisory: any): string {
+  return `${advisory.id}:${advisory.status}:${advisory.isFloodReport}:${advisory.severity}:${advisory.text?.length}`;
+}
+
+async function seedAdvisoriesCache(db: Db) {
+  if (isCacheSeeded) return;
+  try {
+    const existing = await db
+      .collection("advisories")
+      .find({})
+      .project({ id: 1, status: 1, isFloodReport: 1, severity: 1, text: 1 })
+      .toArray();
+
+    for (const doc of existing) {
+      if (doc.id) {
+        knownPostHashes.set(doc.id, hashAdvisory(doc));
+      }
+    }
+    isCacheSeeded = true;
+    console.log(`[Cache] Pre-seeded ${knownPostHashes.size} known advisory signatures from MongoDB into memory.`);
+  } catch (err: any) {
+    console.warn("[Cache] Could not pre-seed cache from MongoDB:", err.message);
+  }
+}
 
 /**
  * Scrapes latest tweets and photos from an X profile or search URL using Playwright.
@@ -377,7 +406,7 @@ export async function runScraperJob() {
 
   try {
     browser = await chromium.launch({
-      headless: false,
+      headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
     });
 
@@ -418,32 +447,60 @@ export async function runScraperJob() {
 
     console.log(`[Parser] Processed ${advisories.length} total advisories (${activeFloodCount} active flood alerts).`);
 
-    // Write to Firestore in batch
-    const batch = db.batch();
+    // Write to MongoDB with In-Memory Caching (Dirty-check before write)
+    const db = await getDatabase();
+    await seedAdvisoriesCache(db);
 
-    for (const advisory of advisories) {
-      const docRef = db.collection("advisories").doc(advisory.id);
-      const sanitized = JSON.parse(JSON.stringify(advisory));
-      batch.set(docRef, sanitized, { merge: true });
+    const changedAdvisories = advisories.filter((advisory) => {
+      const hash = hashAdvisory(advisory);
+      if (knownPostHashes.get(advisory.id) === hash) {
+        return false; // Already in DB with same status
+      }
+      return true;
+    });
+
+    if (changedAdvisories.length > 0) {
+      const ops = changedAdvisories.map((advisory) => {
+        const sanitized = JSON.parse(JSON.stringify(advisory));
+        return {
+          updateOne: {
+            filter: { id: advisory.id },
+            update: { $set: sanitized },
+            upsert: true,
+          },
+        };
+      });
+
+      await db.collection("advisories").bulkWrite(ops, { ordered: false });
+
+      // Update in-memory cache
+      for (const advisory of changedAdvisories) {
+        knownPostHashes.set(advisory.id, hashAdvisory(advisory));
+      }
+
+      console.log(`✅ [MongoDB] Saved ${changedAdvisories.length} new/updated advisories (cached ${advisories.length - changedAdvisories.length} unchanged) in ${Date.now() - start}ms.`);
+    } else {
+      console.log(`⚡ [Cache Hit] All ${advisories.length} advisories are already up-to-date in MongoDB. Skipped DB writes.`);
     }
 
     // Write Sync Metadata
-    const metaRef = db.collection("sync_meta").doc("advisories");
-    batch.set(
-      metaRef,
+    await db.collection("sync_meta").updateOne(
+      { _id: "advisories" as any },
       {
-        lastSyncedAt: new Date().toISOString(),
-        totalCount: advisories.length,
-        activeFloodCount,
-        durationMs: Date.now() - start,
+        $set: {
+          _id: "advisories" as any,
+          lastSyncedAt: new Date().toISOString(),
+          totalCount: advisories.length,
+          activeFloodCount,
+          durationMs: Date.now() - start,
+        },
       },
-      { merge: true }
+      { upsert: true }
     );
 
-    await batch.commit();
-    console.log(`✅ [Firestore] Successfully committed ${advisories.length} advisories in ${Date.now() - start}ms.`);
   } catch (err: any) {
     console.error(`❌ [Scraper Error]:`, err.message);
+
   } finally {
     if (browser) {
       await browser.close();

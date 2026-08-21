@@ -12,16 +12,19 @@
 [![Leaflet](https://img.shields.io/badge/Leaflet-1.9.4-199900?style=for-the-badge&logo=leaflet)](https://leafletjs.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-**Bahaba** is an open-source, hyper-local flood monitoring, hazard prediction, and turn-by-turn navigation platform built for Metro Manila and the Pasig-Marikina-Tullahan River Basin. It combines live hydrological and weather telemetry from **PAGASA** and **DOST-PAGASA Panahon Automated Weather Stations (AWS)**, evaluates road surface inundation depths using hydro-predictive heuristics and machine learning models, and computes flood risk along turn-by-turn **Driving** and **Walking** routes.
+**Bahaba** is an open-source, hyper-local flood monitoring, hazard prediction, and turn-by-turn navigation platform built for Metro Manila and the Philippine river basins. It combines live hydrological and weather telemetry from **DOST-PAGASA Panahon API (AWS, River Basin Water Levels & Rain Gauges, Synoptic Stations, Cyclone Tracking)**, evaluates road surface inundation depths using hydro-predictive heuristics and machine learning models, and computes flood risk along turn-by-turn **Driving** and **Walking** routes.
 
 ---
 
 ## 🌟 Key Features
 
-### 📡 Dual Live Telemetry Ingestion Pipeline
-- **PAGASA FFWS Scraper**: Scrapes 10-minute rainfall and water-level readings from the Pasig-Marikina-Tullahan Flood Forecasting & Warning System internal AJAX APIs.
-- **DOST-PAGASA Panahon AWS Scraper**: Scrapes nationwide Automated Weather Station (AWS) network data via authenticated session handshakes to monitor hourly and 24-hour rainfall accumulation across Metro Manila and surrounding catchments.
-- **Throttled Cron Ingestion (`/api/cron/ingest`)**: Automatic 30-minute deduplication throttling with override support (`?force=true` or `x-force-sync: true`), persisting consolidated telemetry snapshots to `sync_meta` and active snapshots to `stations`.
+### 📡 DOST-PAGASA Panahon Telemetry Ingestion Pipeline
+- **DOST-PAGASA Panahon API Integration**: Direct nationwide telemetry consumption from DOST-PAGASA's unified Panahon portal (`https://www.panahon.gov.ph`), including:
+  - **Automated Weather Stations (AWS)**: 1-hour and 24-hour rainfall accumulation, temperature, heat index, relative humidity, atmospheric pressure, and wind vectors across hundreds of nationwide stations.
+  - **River Basin Hydrology**: Real-time river water levels in meters ($m$) and catchment rain gauges ($mm$) across major Philippine river basins (Pampanga, Agno, Bicol, Cagayan, Pasig-Marikina, etc.).
+  - **Synoptic Weather Stations**: Surface observations, 3-hour precipitation, MSLP, and weather condition codes.
+  - **Tropical Cyclone Track Tracking**: Live cyclone coordinates, categorization (TD/TS/STS/TY/STY), and forecast track radii.
+- **Throttled Cron Ingestion (`/api/cron/ingest`)**: Automatic 15-minute deduplication throttling with override support (`?force=true` or `x-force-sync: true`), persisting consolidated telemetry snapshots to MongoDB `sync_meta` and active snapshots to `stations`.
 
 ### 🧠 Dual-Signal Hydrological Flood Risk Engine
 - **Pluvial-Primary Urban Modeling**: Calibrated to Metro Manila urban hydrology where road surface flooding is overwhelmingly pluvial (rainfall exceeding storm drain capacity) rather than river overflow.
@@ -58,7 +61,7 @@
 - **One-Click Sharing**: Direct image copy to clipboard (`navigator.clipboard`), native Web Share API with attached files, and formatted plain-text alert generation.
 
 ### 📊 Telemetry & Analytics
-- **Firestore Streaming**: Real-time WebSocket updates via `useLiveFloodStatus` hook with automatic fallback to live scraping.
+- **MongoDB Streaming**: Real-time updates via `useLiveFloodStatus` hook with automatic fallback to live Panahon scraping.
 - **Firebase Analytics**: SSR-safe event telemetry tracking route searches, station selections, road inspections, share formats, and sync actions.
 
 ---
@@ -68,17 +71,19 @@
 ```mermaid
 flowchart TD
     subgraph External_Data["External Telemetry & APIs"]
-        PAGASA["PAGASA Pasig-Marikina FFWS\n(/rainfall & /water APIs)"]
-        PANAHON["DOST-PAGASA Panahon\n(AWS Rainfall Network)"]
+        PANAHON_AWS["DOST-PAGASA Panahon AWS\n(/api/v1/aws?parameter=rainfall,temp,etc.)"]
+        PANAHON_RIVER["DOST-PAGASA River Basins\n(/api/v1/riverbasin/waterlevel & raingauge)"]
+        PANAHON_SYNOP["DOST-PAGASA Synoptic\n(/api/v1/synop?parameter=rain,weather)"]
+        PANAHON_CYCLONE["DOST-PAGASA Cyclone Track\n(/api/v1/cyclone-track)"]
         OSRM["OSRM Public Routing API\n(Driving & Walking Profiles)"]
         OPEN_METEO["Open-Meteo DEM API\n(Elevation in Meters ASL)"]
         NOMINATIM["OpenStreetMap Nominatim\n(Geocoding Autocomplete)"]
     end
 
     subgraph Ingestion_Persistence["Ingestion & Persistence"]
-        CRON["/api/cron/ingest Endpoint\n(30-Min Throttled Sync)"]
-        SCRAPER["Dual Scraper Engine\n(PAGASA FFWS + Panahon)"]
-        FIRESTORE[("Cloud Firestore\n• sync_meta (snapshot)\n• stations")]
+        CRON["/api/cron/ingest Endpoint\n(15-Min Throttled Sync)"]
+        SCRAPER["Panahon Scraper & API Engine\n(panahon-scraper.ts)"]
+        MONGODB[("MongoDB Database\n• sync_meta (snapshot)\n• stations (2dsphere index)")]
     end
 
     subgraph Risk_Navigation_Engine["Hydrological & Navigation Engine"]
@@ -93,7 +98,7 @@ flowchart TD
     end
 
     subgraph Frontend_UI["Frontend Application (Next.js 16 + React 19)"]
-        HOOK["useLiveFloodStatus Hook\n(Firestore Stream / Fallback)"]
+        HOOK["useLiveFloodStatus Hook\n(MongoDB Stream / Fallback)"]
         MAP["Leaflet Dark Matter Map\n(Continuous Polyline + Radar Focus)"]
         AUTOCOMPLETE["Location Autocomplete Search"]
         STATION_TABLE["Telemetry & Road Tables\n(Multi-Column Sort)"]
@@ -102,11 +107,13 @@ flowchart TD
     end
 
     %% Ingestion flow
-    PAGASA -->|HTTP AJAX| SCRAPER
-    PANAHON -->|Session & Cookie AWS API| SCRAPER
+    PANAHON_AWS -->|REST API (Token / Handshake)| SCRAPER
+    PANAHON_RIVER -->|REST API (Water Level & Rain)| SCRAPER
+    PANAHON_SYNOP -->|REST API (Synoptic)| SCRAPER
+    PANAHON_CYCLONE -->|REST API (Cyclone)| SCRAPER
     CRON -->|Trigger Sync| SCRAPER
-    SCRAPER -->|Batch Write| FIRESTORE
-    FIRESTORE -->|Real-time Snapshot Stream| HOOK
+    SCRAPER -->|Bulk Upsert| MONGODB
+    MONGODB -->|Snapshot & Geo Queries| HOOK
 
     %% UI consumption
     HOOK --> MAP
@@ -363,54 +370,100 @@ npx tsx src/lib/firebase/__tests__/geo.test.ts
 
 ---
 
-## 📡 API Reference
+## 🌐 DOST-PAGASA Panahon API Reference
+
+Bahaba is fully migrated to **DOST-PAGASA Panahon (`https://www.panahon.gov.ph`)**. All endpoints support querying with `?token=<TOKEN>` or via authenticated session handshakes.
+
+### 1. Automated Weather Stations (AWS)
+Base Endpoint: `https://www.panahon.gov.ph/api/v1/aws`
+
+| Parameter | Unit | Description | Sample Request URL | Sample Response |
+| :--- | :--- | :--- | :--- | :--- |
+| `rainfall` | `mm` | 1-hour & 24-hour accumulated rainfall | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=rainfall` | [`aws/rainfall.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/rainfall.json) |
+| `temperature` | `°C` | Real-time ambient temperature | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=temperature` | [`aws/temperature.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/temperature.json) |
+| `heat-index` | `°C` | Apparent calculated heat index | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=heat-index` | [`aws/heat-index.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/heat-index.json) |
+| `humidity` | `%` | Relative atmospheric humidity | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=humidity` | [`aws/humidity.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/humidity.json) |
+| `pressure` | `hPa` | Atmospheric station pressure | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=pressure` | [`aws/pressure.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/pressure.json) |
+| `wind-speed` | `m/s` | Current wind speed velocity | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=wind-speed` | [`aws/wind-speed.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/wind-speed.json) |
+| `wind-direction` | `°` | Wind compass direction | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=wind-direction` | [`aws/wind-direction.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/wind-direction.json) |
+
+### 2. River Basin Hydrological Telemetry
+Endpoints:
+- Water Level: `https://www.panahon.gov.ph/api/v1/riverbasin/waterlevel?token=<API_TOKEN>&parameter=waterlevel`
+- Rain Gauge: `https://www.panahon.gov.ph/api/v1/riverbasin/raingauge?token=<API_TOKEN>&parameter=raingauge`
+
+| Endpoint | Parameter | Unit | Description | Sample Request URL | Sample Response |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/v1/riverbasin/waterlevel` | `waterlevel` | `m` | Real-time river water stage | `https://www.panahon.gov.ph/api/v1/riverbasin/waterlevel?token=<API_TOKEN>&parameter=waterlevel` | [`riverbasin/waterlevel.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/riverbasin/waterlevel.json) |
+| `/api/v1/riverbasin/raingauge` | `raingauge` | `mm` | River basin rain gauge | `https://www.panahon.gov.ph/api/v1/riverbasin/raingauge?token=<API_TOKEN>&parameter=raingauge` | [`riverbasin/raingauge.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/riverbasin/raingauge.json) |
+
+### 3. Synoptic Weather Stations
+Base Endpoint: `https://www.panahon.gov.ph/api/v1/synop`
+
+| Parameter | Unit | Description | Sample Request URL | Sample Response |
+| :--- | :--- | :--- | :--- | :--- |
+| `observed_weather` | Text/JSON | Synoptic weather conditions & icon | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=observed_weather` | [`synop/observed_weather.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/observed_weather.json) |
+| `rain` | `mm` | 3-hour precipitation accumulation | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=rain` | [`synop/rain.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/rain.json) |
+| `currentTemp` | `°C` | Surface station temperature | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=currentTemp` | [`synop/currentTemp.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/currentTemp.json) |
+| `mslp` | `hPa` | Mean Sea Level Pressure | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=mslp` | [`synop/mslp.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/mslp.json) |
+| `windSpeed` | `m/s` | Synoptic wind speed | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=windSpeed` | [`synop/windSpeed.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/windSpeed.json) |
+| `windDirection` | Cardinal | Synoptic wind compass heading (e.g. `ENE`) | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=windDirection` | [`synop/windDirection.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/windDirection.json) |
+
+### 4. Tropical Cyclone Tracking
+Endpoint: `https://www.panahon.gov.ph/api/v1/cyclone-track`
+
+| Endpoint | Description | Sample Request URL | Sample Response |
+| :--- | :--- | :--- | :--- |
+| `/api/v1/cyclone-track` | Tropical cyclone coordinates, category (TD, TS, STS, TY, STY), and radius | `https://www.panahon.gov.ph/api/v1/cyclone-track?token=<API_TOKEN>` | [`cyclone/cyclone-track.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/cyclone/cyclone-track.json) |
+
+---
+
+## 📡 Ingestion API Reference
 
 ### `GET /api/cron/ingest`
-Scrapes PAGASA FFWS and Panahon AWS stations, normalizes rainfall and water level readings, calculates composite risk, and commits batch updates to Cloud Firestore.
+Ingests real-time telemetry from DOST-PAGASA Panahon (AWS, River Basins, Synoptic), normalizes rainfall and water level readings, calculates composite risk, and commits batch updates to MongoDB.
 
 #### Query Parameters / Headers
-- `?force=true` or Header `x-force-sync: true`: Forces ingestion write even if the previous sync was completed within the last 30 minutes.
+- `?force=true` or Header `x-force-sync: true`: Forces ingestion write even if the previous sync was completed within the last 15 minutes.
 
 #### Response Headers
 - `X-Scrape-Duration-Ms`: Ingestion pipeline execution time in milliseconds.
 - `X-Rainfall-Rows`: Count of normalized rainfall rows.
 - `X-WaterLevel-Rows`: Count of normalized water-level rows.
-- `X-Firestore-Persisted-Stations`: Number of stations written to Firestore.
-- `X-Firestore-Skipped`: `true` if write was skipped due to 30-minute throttling window.
+- `X-DB-Persisted-Stations`: Number of stations written to MongoDB.
+- `X-Cache`: `HIT-MEMORY`, `HIT-MONGODB-SNAPSHOT`, or `MISS-SCRAPED`.
 
 #### Response Body Example
 ```json
 {
   "success": true,
-  "scrapedAt": "2026-08-19T00:30:00.000Z",
+  "scrapedAt": "2026-08-21T03:30:00.000Z",
   "stations": [
     {
-      "stationName": "Sto. Niño",
-      "latitude": 14.6334,
-      "longitude": 121.0945,
+      "stationName": "Science Garden, Quezon City",
+      "latitude": 14.645101,
+      "longitude": 121.044258,
       "rainfall": {
-        "stationName": "Sto. Niño",
-        "rain10min": 2.5,
-        "rain1hr": 18.0,
-        "rain24hr": 64.0
+        "stationName": "Science Garden, Quezon City",
+        "rain10min": 0,
+        "rain1hr": 0,
+        "rain3hr": 0,
+        "rain24hr": 0
       },
-      "waterLevel": {
-        "stationName": "Sto. Niño",
-        "currentLevel": 15.2,
-        "change1hr": 0.4,
-        "alertLevel": 15.0,
-        "alarmLevel": 16.0,
-        "criticalLevel": 17.0
-      },
-      "waterRiskLevel": "ALERT",
-      "rainRiskLevel": "ALARM",
-      "riskLevel": "ALARM"
+      "waterLevel": null,
+      "waterRiskLevel": "NORMAL",
+      "rainRiskLevel": "NORMAL",
+      "riskLevel": "NORMAL",
+      "temperatureC": 30.4,
+      "heatIndexC": 37.5,
+      "humidityPercent": 73,
+      "observedAt": "2026-08-21T03:00:00.000Z"
     }
   ],
   "meta": {
-    "rainfallRowCount": 42,
-    "waterLevelRowCount": 28,
-    "durationMs": 1420
+    "rainfallRowCount": 156,
+    "waterLevelRowCount": 78,
+    "durationMs": 1120
   }
 }
 ```

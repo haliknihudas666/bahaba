@@ -20,6 +20,7 @@
     "firebase-admin": "^12.4.0",
     "geofire-common": "^6.0.0",
     "html-to-image": "^1.11.13",
+    "mongodb": "^6.21.0",
     "next": "16.3.0",
     "pmtiles": "^4.5.0",
     "protomaps-leaflet": "^5.1.0",
