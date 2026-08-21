@@ -674,9 +674,12 @@ function StoryCardContent({
       {/* ── TOP SAFE ZONE: Brand & Live Header ───────────────────────── */}
       <div className="flex items-center justify-between relative z-10 px-1 border-b border-slate-800/80 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-xl shadow-lg shadow-cyan-500/30 flex-shrink-0">
-            🌊
-          </div>
+          <img
+            src="/bahaba.png"
+            alt="Baha Ba? Logo"
+            className="w-10 h-10 object-contain flex-shrink-0 drop-shadow-md"
+            crossOrigin="anonymous"
+          />
           <div>
             <div className="text-base font-black tracking-tight text-white flex items-center gap-2">
               Baha Ba?
@@ -897,9 +900,12 @@ function FeedCardContent({
       {/* Header Bar */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-lg shadow-md shadow-cyan-500/30 flex-shrink-0">
-            🌊
-          </div>
+          <img
+            src="/bahaba.png"
+            alt="Baha Ba? Logo"
+            className="w-9 h-9 object-contain flex-shrink-0 drop-shadow-md"
+            crossOrigin="anonymous"
+          />
           <div>
             <div className="text-sm font-black tracking-tight text-white flex items-center gap-2">
               Baha Ba?

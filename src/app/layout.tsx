@@ -7,6 +7,11 @@ export const metadata: Metadata = {
   title: "Bahaba – Metro Manila Flood Prediction & Telemetry",
   description:
     "Real-time flood prediction and PAGASA telemetry dashboard for Metro Manila's Pasig-Marikina-Tullahan river basin.",
+  icons: {
+    icon: "/bahaba.png",
+    shortcut: "/bahaba.png",
+    apple: "/bahaba.png",
+  },
 };
 
 export default function RootLayout({

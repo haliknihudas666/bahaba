@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 
 export interface HighRiskStationSummary {
   stationId: string;
@@ -96,9 +97,14 @@ export default function MapHeaderControls({
           className="pointer-events-auto flex items-center gap-2 bg-slate-900/90 hover:bg-slate-800/95 backdrop-blur-xl border border-slate-800/90 hover:border-cyan-500/50 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl shadow-2xl flex-shrink-0 transition-all text-left group"
           title="About Baha Ba? & Data Attributions"
         >
-          <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-sm sm:text-lg shadow-md shadow-cyan-500/30 flex-shrink-0 group-hover:scale-105 transition-transform">
-            🌊
-          </div>
+          <Image
+            src="/bahaba.png"
+            alt="Baha Ba? Logo"
+            width={36}
+            height={36}
+            className="w-7 h-7 sm:w-9 sm:h-9 object-contain flex-shrink-0 group-hover:scale-105 transition-transform drop-shadow-md"
+            priority
+          />
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
               <h1 className="text-xs sm:text-base font-black tracking-tight text-white leading-none group-hover:text-cyan-300 transition-colors">

@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { trackAboutAction } from "@/lib/firebase/analytics";
 
 interface AboutModalProps {
@@ -78,9 +79,13 @@ export default function AboutModal({ isOpen, onClose, onOpenDonationModal }: Abo
         {/* Modal Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b border-slate-800/80 bg-slate-950/40 flex-shrink-0 gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-lg sm:text-xl shadow-lg shadow-cyan-500/25 flex-shrink-0">
-              🌊
-            </div>
+            <Image
+              src="/bahaba.png"
+              alt="Baha Ba? Logo"
+              width={40}
+              height={40}
+              className="w-9 h-9 sm:w-10 sm:h-10 object-contain flex-shrink-0 drop-shadow-lg"
+            />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
