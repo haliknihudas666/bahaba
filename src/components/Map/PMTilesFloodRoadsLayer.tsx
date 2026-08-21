@@ -67,16 +67,20 @@ interface PMTilesFloodRoadsLayerProps {
   visible?: boolean;
   /** Active PAGASA telemetry stations */
   stations?: LiveStation[];
+  /** Whether background roads should be dimmed (e.g. when route is active / route has flood) */
+  dimmed?: boolean;
 }
 
 export default function PMTilesFloodRoadsLayer({
   map,
   visible = true,
   stations = [],
+  dimmed = false,
 }: PMTilesFloodRoadsLayerProps) {
   const layerRef = useRef<any>(null);
   const isMountedRef = useRef<boolean>(true);
   const stationsRef = useRef<LiveStation[]>(stations);
+  const dimmedRef = useRef<boolean>(dimmed);
   const [rainRate, setRainRate] = useState<number>(0);
   const [rain24h, setRain24h] = useState<number>(0);
   const rainRateRef = useRef<number>(0);
@@ -93,6 +97,14 @@ export default function PMTilesFloodRoadsLayer({
       isMountedRef.current = false;
     };
   }, []);
+
+  // Update dimmed ref and redraw when dimming state changes
+  useEffect(() => {
+    dimmedRef.current = dimmed;
+    if (layerRef.current && typeof layerRef.current.redraw === "function") {
+      layerRef.current.redraw();
+    }
+  }, [dimmed]);
 
   // Update stations ref and redraw only if station count or high-risk count changed
   useEffect(() => {
@@ -205,19 +217,28 @@ export default function PMTilesFloodRoadsLayer({
               }
 
               // Gutter Deep (6–15 cm)
-              if (cls === "motorway" || cls === "trunk") return "rgba(56, 189, 248, 0.95)";
+              if (cls === "motorway" || cls === "trunk") return "rgba(245, 158, 11, 0.98)";
               if (cls === "primary") return "rgba(249, 115, 22, 0.98)";
               if (cls === "secondary") return "rgba(251, 146, 60, 0.95)";
               if (cls === "tertiary") return "rgba(253, 186, 116, 0.90)";
               return "rgba(251, 146, 60, 0.75)";
             }
 
-            // ── CLEAR / DRY ROADS (Sleek Dark Mode Cyan / Slate Palette) ──
-            if (cls === "motorway" || cls === "trunk") return "rgba(56, 189, 248, 0.95)";
-            if (cls === "primary") return "rgba(96, 165, 250, 0.90)";
-            if (cls === "secondary") return "rgba(147, 197, 253, 0.80)";
-            if (cls === "tertiary") return "rgba(148, 163, 184, 0.65)";
-            return "rgba(100, 116, 139, 0.45)";
+            // ── CLEAR / DRY ROADS (Dimmed Soft White / Slate Hierarchy) ──
+            const isDimmed = dimmedRef.current;
+            if (isDimmed) {
+              if (cls === "motorway" || cls === "trunk") return "rgba(241, 245, 249, 0.32)";
+              if (cls === "primary") return "rgba(226, 232, 240, 0.24)";
+              if (cls === "secondary") return "rgba(203, 213, 225, 0.17)";
+              if (cls === "tertiary") return "rgba(148, 163, 184, 0.12)";
+              return "rgba(100, 116, 139, 0.08)";
+            }
+
+            if (cls === "motorway" || cls === "trunk") return "rgba(248, 250, 252, 0.72)";
+            if (cls === "primary") return "rgba(241, 245, 249, 0.60)";
+            if (cls === "secondary") return "rgba(226, 232, 240, 0.48)";
+            if (cls === "tertiary") return "rgba(203, 213, 225, 0.34)";
+            return "rgba(148, 163, 184, 0.20)";
           },
           width: (z: number, f: any) => {
             const cls = f?.props?.class;

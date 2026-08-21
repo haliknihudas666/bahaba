@@ -353,11 +353,35 @@ export default function RoadFloodMap({
           if (validFullCoords.length >= 2) {
             validFullCoords.forEach((c) => bounds.push(c));
 
+            const hasFloodOnRoute = Boolean(
+              routeSegments &&
+                routeSegments.some(
+                  (s) =>
+                    (s.depthCm && s.depthCm >= 6) ||
+                    s.severity === "CRITICAL" ||
+                    s.severity === "ALARM" ||
+                    s.severity === "ALERT"
+                )
+            );
+
             if (isWalking) {
+              if (hasFloodOnRoute) {
+                // Outer glowing pulse aura when flooded
+                L.polyline(validFullCoords, {
+                  color: "#06b6d4",
+                  weight: 14,
+                  opacity: 0.5,
+                  className: "route-glow-pulse",
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+              }
+
               L.polyline(validFullCoords, {
                 color: "#022c22",
                 weight: 8,
-                opacity: 0.9,
+                opacity: 0.95,
                 dashArray: "10, 8",
                 lineCap: "round",
                 lineJoin: "round",
@@ -367,30 +391,87 @@ export default function RoadFloodMap({
               L.polyline(validFullCoords, {
                 color: "#06b6d4",
                 weight: 5,
-                opacity: 0.95,
+                opacity: 1,
                 dashArray: "6, 6",
                 lineCap: "round",
                 lineJoin: "round",
                 noClip: true,
               }).addTo(routeGroup);
             } else {
-              L.polyline(validFullCoords, {
-                color: "#0f172a",
-                weight: 9,
-                opacity: 0.9,
-                lineCap: "round",
-                lineJoin: "round",
-                noClip: true,
-              }).addTo(routeGroup);
+              if (hasFloodOnRoute) {
+                // ── EXTRA VIBRANT HIGHLIGHT FOR FLOODED ROUTE ──
+                // 1. Wide pulsing outer aura
+                L.polyline(validFullCoords, {
+                  color: "#38bdf8",
+                  weight: 16,
+                  opacity: 0.55,
+                  className: "route-glow-pulse",
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
 
-              L.polyline(validFullCoords, {
-                color: "#2563eb",
-                weight: 6,
-                opacity: 0.9,
-                lineCap: "round",
-                lineJoin: "round",
-                noClip: true,
-              }).addTo(routeGroup);
+                // 2. Electric blue intermediate casing
+                L.polyline(validFullCoords, {
+                  color: "#1d4ed8",
+                  weight: 11,
+                  opacity: 0.85,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+
+                // 3. Dark outline casing for crisp contrast against white roads
+                L.polyline(validFullCoords, {
+                  color: "#020617",
+                  weight: 8,
+                  opacity: 0.98,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+
+                // 4. Vibrant High-Contrast Blue Core
+                L.polyline(validFullCoords, {
+                  color: "#3b82f6",
+                  weight: 5,
+                  opacity: 1,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+              } else {
+                // ── STANDARD CLEAN BLUE ROUTE OVER WHITE ROADS ──
+                // 1. Subtle soft blue ambient casing
+                L.polyline(validFullCoords, {
+                  color: "#2563eb",
+                  weight: 11,
+                  opacity: 0.35,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+
+                // 2. Dark outline casing for crisp contrast against white roads
+                L.polyline(validFullCoords, {
+                  color: "#020617",
+                  weight: 8,
+                  opacity: 0.95,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+
+                // 3. Crisp Blue Core
+                L.polyline(validFullCoords, {
+                  color: "#2563eb",
+                  weight: 5,
+                  opacity: 1,
+                  lineCap: "round",
+                  lineJoin: "round",
+                  noClip: true,
+                }).addTo(routeGroup);
+              }
             }
           }
         }
@@ -415,10 +496,22 @@ export default function RoadFloodMap({
             );
 
             if (validCoords.length >= 2) {
+              // Dark casing under flooded segment for maximum legibility
+              L.polyline(validCoords, {
+                color: "#020617",
+                weight: segment.severity === "CRITICAL" ? 12 : segment.severity === "ALARM" ? 11 : 10,
+                opacity: 0.98,
+                lineCap: "round",
+                lineJoin: "round",
+                noClip: true,
+              }).addTo(routeGroup);
+
+              // Vibrant warning color on top
               const segPolyline = L.polyline(validCoords, {
                 color: segment.color,
                 weight: segment.severity === "CRITICAL" ? 9 : segment.severity === "ALARM" ? 8 : 7,
-                opacity: 0.95,
+                opacity: 1,
+                className: "flooded-segment-pulse",
                 lineCap: "round",
                 lineJoin: "round",
                 noClip: true,
@@ -542,8 +635,15 @@ export default function RoadFloodMap({
     map.whenReady(renderRoute);
   }, [fullRoutePolyline, routeSegments, originCoords, destinationCoords, travelMode, mapLoaded]);
 
+  const hasActiveRoute = Boolean(fullRoutePolyline && fullRoutePolyline.length >= 2);
+
   return (
-    <div id="bahaba-interactive-map" className="relative w-full h-full min-h-full overflow-hidden bg-slate-950">
+    <div
+      id="bahaba-interactive-map"
+      className={`relative w-full h-full min-h-full overflow-hidden bg-slate-950 ${
+        hasActiveRoute ? "map-dimmed" : ""
+      }`}
+    >
       {/* Map Canvas */}
       <div ref={mapContainerRef} className="w-full h-full min-h-full z-0" />
 
@@ -563,6 +663,7 @@ export default function RoadFloodMap({
             map={leafletMapRef.current}
             visible={true}
             stations={stations}
+            dimmed={hasActiveRoute}
           />
           <LiveAdvisoryOverlayLayer
             map={leafletMapRef.current}
@@ -580,6 +681,34 @@ export default function RoadFloodMap({
             transform: scale(2);
             opacity: 0;
           }
+        }
+        @keyframes routeGlowPulse {
+          0%, 100% {
+            opacity: 0.40;
+            filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.7));
+          }
+          50% {
+            opacity: 0.85;
+            filter: drop-shadow(0 0 16px rgba(59, 130, 246, 0.95));
+          }
+        }
+        .route-glow-pulse {
+          animation: routeGlowPulse 2.2s ease-in-out infinite;
+        }
+        @keyframes floodSegmentPulse {
+          0%, 100% {
+            filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.7));
+          }
+          50% {
+            filter: drop-shadow(0 0 14px rgba(249, 115, 22, 0.95));
+          }
+        }
+        .flooded-segment-pulse {
+          animation: floodSegmentPulse 1.8s ease-in-out infinite;
+        }
+        .map-dimmed .leaflet-tile-pane {
+          filter: brightness(0.70) contrast(1.08);
+          transition: filter 0.5s ease;
         }
         .custom-station-icon, .custom-pin-a, .custom-pin-b {
           background: transparent !important;
