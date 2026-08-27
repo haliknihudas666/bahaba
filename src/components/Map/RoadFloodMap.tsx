@@ -92,17 +92,12 @@ export default function RoadFloodMap({
       // Add Zoom control at bottomright
       L.control.zoom({ position: "bottomright" }).addTo(map);
 
-      // Dark theme map tiles with NO labels or road markings (CartoDB Dark Matter No Labels)
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
-        {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-          subdomains: "abcd",
-          maxZoom: 19,
-          crossOrigin: true,
-        }
-      ).addTo(map);
+      // Add OpenStreetMap & Protomaps attribution for the Philippines Vector PMTiles basemap
+      if (map.attributionControl) {
+        map.attributionControl.addAttribution(
+          '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://protomaps.com/" target="_blank" rel="noopener">Protomaps</a>'
+        );
+      }
 
       map.whenReady(() => {
         map.invalidateSize();

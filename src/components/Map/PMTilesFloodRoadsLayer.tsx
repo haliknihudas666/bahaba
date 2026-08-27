@@ -272,13 +272,96 @@ export default function PMTilesFloodRoadsLayer({
           return origBefore(ctx, z);
         };
 
+        // Base natural landcover
+        const landcoverSymbolizer = new protomapsL.PolygonSymbolizer({
+          fill: "#080e1a",
+          opacity: 0.95,
+        });
+
+        // Urban & commercial landuse
+        const landuseSymbolizer = new protomapsL.PolygonSymbolizer({
+          fill: (z: number, f: any) => {
+            const cls = f?.props?.class;
+            if (cls === "commercial" || cls === "industrial") return "#0e1726";
+            if (cls === "residential") return "#0a1120";
+            return "#0b1424";
+          },
+          opacity: 0.9,
+        });
+
+        // Parks & green spaces
+        const parkSymbolizer = new protomapsL.PolygonSymbolizer({
+          fill: "#061712",
+          opacity: 0.8,
+        });
+
+        // Water bodies (oceans, bays, lakes)
+        const waterSymbolizer = new protomapsL.PolygonSymbolizer({
+          fill: "#051122",
+          opacity: 0.98,
+        });
+
+        // Waterways (rivers, canals, esteros)
+        const waterwaySymbolizer = new protomapsL.LineSymbolizer({
+          color: "#0e2c52",
+          width: (z: number) => (z >= 14 ? 3.2 : z >= 12 ? 2.0 : 1.2),
+          opacity: 0.85,
+        });
+
+        // Administrative boundaries
+        const boundarySymbolizer = new protomapsL.LineSymbolizer({
+          color: "#1e293b",
+          width: (z: number) => (z >= 12 ? 1.4 : 0.8),
+          opacity: 0.65,
+        });
+
+        // Building footprints at close zoom (>=14)
+        const buildingSymbolizer = new protomapsL.PolygonSymbolizer({
+          fill: "#141e2e",
+          opacity: 0.6,
+        });
+
         const layer = protomapsL.leafletLayer({
           url: roadsPMTilesSource as any,
+          backgroundColor: "#030712",
           paintRules: [
-            // Physical Road Vectors with Zoom Filtering & Live Flood Engine Inundation Styling
+            // 1. Natural Landcover & Landuse
+            {
+              dataLayer: "landcover",
+              symbolizer: landcoverSymbolizer,
+            },
+            {
+              dataLayer: "landuse",
+              symbolizer: landuseSymbolizer,
+            },
+            {
+              dataLayer: "park",
+              symbolizer: parkSymbolizer,
+            },
+            // 2. Water Bodies & River Networks
+            {
+              dataLayer: "water",
+              symbolizer: waterSymbolizer,
+            },
+            {
+              dataLayer: "waterway",
+              symbolizer: waterwaySymbolizer,
+            },
+            // 3. Administrative Boundaries
+            {
+              dataLayer: "boundary",
+              symbolizer: boundarySymbolizer,
+            },
+            // 4. Building Footprints (High Zoom)
+            {
+              dataLayer: "building",
+              minzoom: 14,
+              symbolizer: buildingSymbolizer,
+            },
+            // 5. Physical Road Vectors with Zoom Filtering & Live Flood Engine Inundation Styling
             {
               dataLayer: "transportation",
-              minzoom: 8,
+              minzoom: 6,
               filter: (z: number, f: any) => {
                 const cls = f?.props?.class;
                 // At low zoom (<11), draw only motorways and primary highways to keep map fast & responsive
@@ -302,7 +385,20 @@ export default function PMTilesFloodRoadsLayer({
             },
           ],
           labelRules: [
-            // High-Legibility Road Name Labels (street-level zoom >= 14 to save heavy geometry placement calculations)
+            // Major Cities and Municipalities (Manila, QC, Makati, Pasig, Marikina, etc.)
+            {
+              dataLayer: "place",
+              minzoom: 7,
+              maxzoom: 15,
+              symbolizer: new protomapsL.CenteredTextSymbolizer({
+                labelProps: ["name:en", "name", "name_int"],
+                fill: "#94a3b8",
+                font: "600 11px system-ui, -apple-system, sans-serif",
+                stroke: "#020617",
+                width: 3.0,
+              }),
+            },
+            // High-Legibility Road Name Labels (street-level zoom >= 14)
             {
               dataLayer: "transportation_name",
               minzoom: 14,

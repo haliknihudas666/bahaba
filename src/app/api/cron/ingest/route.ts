@@ -64,7 +64,56 @@ function parseTimestamp(val: unknown): Date | null {
 }
 
 /**
- * Retrieve cached telemetry snapshot from MongoDB sync_meta if fresh.
+ * Map MongoDB sync_meta doc to a standardized ScrapeResult.
+ */
+function mapDocToScrapeResult(doc: any): ScrapeResult {
+  const stations: StationTelemetry[] = (doc.stations || []).map((st: any) => ({
+    stationName: st.stationName,
+    latitude: st.coordinates?.latitude ?? null,
+    longitude: st.coordinates?.longitude ?? null,
+    observedAt: st.lastUpdated,
+    rainfall: {
+      stationName: st.stationName,
+      rain10min: st.rain10m ?? 0,
+      rain30min: 0,
+      rain1hr: st.rain1h ?? 0,
+      rain3hr: 0,
+      rain6hr: 0,
+      rain12hr: 0,
+      rain24hr: st.rain24h ?? 0,
+      status: "NORMAL",
+    },
+    waterLevel: {
+      stationName: st.stationName,
+      currentLevel: st.waterLevel ?? 0,
+      change30min: 0,
+      change1hr: st.waterLevelDelta1h ?? 0,
+      change2hr: 0,
+      alertLevel: null,
+      alarmLevel: null,
+      criticalLevel: null,
+    },
+    waterRiskLevel: st.waterRiskLevel || "NORMAL",
+    rainRiskLevel: st.rainRiskLevel || "NORMAL",
+    riskLevel: st.riskLevel || "NORMAL",
+  }));
+
+  return {
+    success: true,
+    scrapedAt: doc.updatedAtIso || doc.lastSyncedAt || new Date().toISOString(),
+    stations,
+    rainfall: [],
+    waterLevels: [],
+    meta: {
+      durationMs: 0,
+      rainfallRowCount: stations.length,
+      waterLevelRowCount: stations.length,
+    },
+  };
+}
+
+/**
+ * Retrieve cached telemetry snapshot from MongoDB sync_meta ONLY if fresh (< 15 minutes).
  */
 async function getFreshTelemetryFromDb(): Promise<ScrapeResult | null> {
   try {
@@ -76,58 +125,37 @@ async function getFreshTelemetryFromDb(): Promise<ScrapeResult | null> {
     );
 
     if (doc && Array.isArray(doc.stations) && doc.stations.length > 0) {
-      const lastSynced = parseTimestamp(doc.lastSyncedAt);
+      const lastSynced = parseTimestamp(doc.lastSyncedAt || doc.updatedAtIso);
       const elapsedMs = lastSynced ? Date.now() - lastSynced.getTime() : Infinity;
 
-      // Map back to StationTelemetry format
-      const stations: StationTelemetry[] = doc.stations.map((st: any) => ({
-        stationName: st.stationName,
-        latitude: st.coordinates?.latitude ?? null,
-        longitude: st.coordinates?.longitude ?? null,
-        observedAt: st.lastUpdated,
-        rainfall: {
-          stationName: st.stationName,
-          rain10min: st.rain10m ?? 0,
-          rain30min: 0,
-          rain1hr: st.rain1h ?? 0,
-          rain3hr: 0,
-          rain6hr: 0,
-          rain12hr: 0,
-          rain24hr: st.rain24h ?? 0,
-          status: "NORMAL",
-        },
-        waterLevel: {
-          stationName: st.stationName,
-          currentLevel: st.waterLevel ?? 0,
-          change30min: 0,
-          change1hr: st.waterLevelDelta1h ?? 0,
-          change2hr: 0,
-          alertLevel: null,
-          alarmLevel: null,
-          criticalLevel: null,
-        },
-        waterRiskLevel: st.waterRiskLevel || "NORMAL",
-        rainRiskLevel: st.rainRiskLevel || "NORMAL",
-        riskLevel: st.riskLevel || "NORMAL",
-      }));
-
-
-      return {
-        success: true,
-        scrapedAt: doc.updatedAtIso || doc.lastSyncedAt || new Date().toISOString(),
-        stations,
-        rainfall: [],
-        waterLevels: [],
-        meta: {
-          durationMs: 0,
-          rainfallRowCount: stations.length,
-          waterLevelRowCount: stations.length,
-        },
-      };
-
+      // Only return DB snapshot if within the 15-minute sync window
+      if (elapsedMs >= 0 && elapsedMs < MIN_SYNC_INTERVAL_MS) {
+        return mapDocToScrapeResult(doc);
+      }
     }
   } catch (err: any) {
     console.warn("[MongoDB] Cached telemetry read skipped:", err.message);
+  }
+  return null;
+}
+
+/**
+ * Retrieve cached telemetry snapshot from MongoDB regardless of age (resilience fallback).
+ */
+async function getStaleTelemetryFromDb(): Promise<ScrapeResult | null> {
+  try {
+    const syncMetaCol = await getCollection("sync_meta");
+    const doc = await withTimeout(
+      syncMetaCol.findOne({ _id: "telemetry" as any }),
+      2500,
+      "MongoDB sync_meta stale read timeout"
+    );
+
+    if (doc && Array.isArray(doc.stations) && doc.stations.length > 0) {
+      return mapDocToScrapeResult(doc);
+    }
+  } catch (err: any) {
+    console.warn("[MongoDB] Stale telemetry fallback read failed:", err.message);
   }
   return null;
 }
@@ -265,7 +293,7 @@ export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
     });
   }
 
-  // Tier 2: Check MongoDB consolidated snapshot before triggering upstream scrape
+  // Tier 2: Check MongoDB consolidated snapshot if fresh (< 15 mins) before triggering upstream scrape
   if (!force) {
     const dbCached = await getFreshTelemetryFromDb();
     if (dbCached && dbCached.stations.length > 0) {
@@ -300,6 +328,20 @@ export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
       console.warn("[MongoDB Ingest] Skipping write:", msg);
       dbMeta = { persistedCount: 0, error: msg };
     }
+  } else if (!result.success || result.stations.length === 0) {
+    // Upstream scrape failed – fallback gracefully to stale DB snapshot if present
+    const staleDb = await getStaleTelemetryFromDb();
+    if (staleDb && staleDb.stations.length > 0) {
+      return NextResponse.json(staleDb, {
+        status: 200,
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+          "X-Cache": "FALLBACK-STALE-MONGODB",
+          "X-DB-Stations": String(staleDb.stations.length),
+          ...(result.error ? { "X-Upstream-Error": result.error } : {}),
+        },
+      });
+    }
   }
 
   const status = result.success ? 200 : 502;
@@ -323,4 +365,5 @@ export async function GET(req?: Request): Promise<NextResponse<ScrapeResult>> {
 // Route segment config
 // ---------------------------------------------------------------------------
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const maxDuration = 60;

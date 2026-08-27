@@ -151,7 +151,7 @@ flowchart TD
 | **Styling** | [Tailwind CSS 4.1](https://tailwindcss.com/) | Modern utility-first responsive styling with dark-mode aesthetic |
 | **Language** | [TypeScript 5.8](https://www.typescriptlang.org/) | End-to-end type safety |
 | **Interactive Map** | [Leaflet.js 1.9.4](https://leafletjs.com/) | Custom HTML markers, GeoJSON layers, pulsating beacons, and polyline overlays |
-| **Map Tiles** | CartoDB Dark Matter | High-contrast dark theme vector basemap |
+| **Map Basemap** | [Philippines PMTiles (Protomaps)](https://protomaps.com/) | High-contrast dark theme hardware-accelerated vector basemap (offline & keyless) |
 | **Routing Engine** | [OSRM (Open Source Routing Machine)](http://project-osrm.org/) | Driving and walking route calculations between Point A and Point B |
 | **Elevation Service**| [Open-Meteo DEM API](https://open-meteo.com/en/docs/elevation-api) | Batch digital elevation sampling along polyline coordinates |
 | **Geocoding** | [OpenStreetMap Nominatim](https://nominatim.org/) | Debounced autocomplete place and landmark search |
