@@ -26,15 +26,15 @@ function runNoahPredictorTests() {
   assert(dryDepth === 0, `Dry weather returns 0 cm standing water depth (calculated: ${dryDepth} cm)`);
 
   // Test 2: Water Depth Formula - Heavy Rain on Low Elevation España Blvd (45 mm/hr rain, 2.2m elevation, Level 3 Hazard)
-  // New model: rainfall activation = clamp(45/60, 0, 1) = 0.75
-  // NOAH Level 3 max depth = 80 cm → contribution = 80 * 0.75 = 60 cm
+  // Calibrated model: rainfall activation = clamp(45/35, 0, 1) = 1.0 (full design activation)
+  // NOAH Level 3 max depth = 80 cm → contribution = 80 * 1.0 = 80 cm
   // Net Rain = max(0, 45 - 25) = 20
   // Elev Factor = 2.2 * 0.5 = 1.1
-  // Total Depth = 20 + 60 - 1.1 = 78.9 cm
+  // Total Depth = 20 + 80 - 1.1 = 98.9 cm
   const espanaDepth = calculateWaterDepth(45, 0, 3, 2.2, 25);
   assert(
-    Math.abs(espanaDepth - 78.9) < 0.2,
-    `España Blvd heavy rain (45mm/hr, elev 2.2m, level 3) computes ~78.9 cm depth (calculated: ${espanaDepth} cm)`
+    Math.abs(espanaDepth - 98.9) < 0.2,
+    `España Blvd heavy rain (45mm/hr, elev 2.2m, level 3) computes ~98.9 cm depth (calculated: ${espanaDepth} cm)`
   );
 
   // Test 3: Risk Classification Mapping

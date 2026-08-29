@@ -378,6 +378,112 @@ export default function RoutePlanner({
                   </div>
                 )
               )}
+
+              {/* 🌦️ Area Weather & 3-Hour Rainfall Forecast Card (PAGASA + Open-Meteo) */}
+              {activeRoute.weatherForecast && (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm">🌦️</span>
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-200 block">
+                          3-Hour Rainfall & Flood Outlook
+                        </span>
+                        <span className="text-[9px] text-slate-400 font-mono">
+                          PAGASA Telemetry + Open-Meteo 1.1km Grid
+                        </span>
+                      </div>
+                    </div>
+
+                    <span
+                      className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border ${
+                        activeRoute.weatherForecast.trend === "WORSENING"
+                          ? "bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse"
+                          : activeRoute.weatherForecast.trend === "IMPROVING"
+                          ? "bg-teal-500/20 text-teal-300 border-teal-500/40"
+                          : activeRoute.weatherForecast.currentRainMmHr > 0
+                          ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                          : "bg-slate-800 text-slate-300 border-slate-700"
+                      }`}
+                    >
+                      {activeRoute.weatherForecast.conditionLabel}
+                    </span>
+                  </div>
+
+                  {/* 4-Column Timeline Breakdown */}
+                  <div className="grid grid-cols-4 gap-1.5 pt-1 text-center font-mono">
+                    <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block font-sans">Now</span>
+                      <strong className={`text-[11px] block ${activeRoute.weatherForecast.currentRainMmHr > 0 ? "text-sky-300" : "text-slate-300"}`}>
+                        {activeRoute.weatherForecast.currentRainMmHr}
+                      </strong>
+                      <span className="text-[8px] text-slate-500">mm/h</span>
+                    </div>
+
+                    <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block font-sans">+1h</span>
+                      <strong className={`text-[11px] block ${activeRoute.weatherForecast.forecast1hMm > 5 ? "text-amber-300" : "text-slate-300"}`}>
+                        +{activeRoute.weatherForecast.forecast1hMm}
+                      </strong>
+                      <span className="text-[8px] text-slate-500">mm</span>
+                    </div>
+
+                    <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block font-sans">+2h</span>
+                      <strong className={`text-[11px] block ${activeRoute.weatherForecast.forecast2hMm > 5 ? "text-amber-300" : "text-slate-300"}`}>
+                        +{activeRoute.weatherForecast.forecast2hMm}
+                      </strong>
+                      <span className="text-[8px] text-slate-500">mm</span>
+                    </div>
+
+                    <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block font-sans">+3h Total</span>
+                      <strong className={`text-[11px] block ${activeRoute.weatherForecast.forecast3hTotalMm > 15 ? "text-rose-300 font-extrabold" : activeRoute.weatherForecast.forecast3hTotalMm > 0 ? "text-amber-300" : "text-slate-300"}`}>
+                        {activeRoute.weatherForecast.forecast3hTotalMm}
+                      </strong>
+                      <span className="text-[8px] text-slate-500">mm</span>
+                    </div>
+                  </div>
+
+                  {/* Flood Progression Projection Bar */}
+                  <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800/80 space-y-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono">
+                      <span className="text-slate-400">Current Standing Water:</span>
+                      <strong className={activeRoute.maxFloodDepthCm >= 16 ? "text-rose-400" : activeRoute.maxFloodDepthCm >= 6 ? "text-amber-400" : "text-emerald-400"}>
+                        {activeRoute.maxFloodDepthCm} cm ({activeRoute.overallStatus})
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] font-mono border-t border-slate-800/60 pt-1">
+                      <span className="text-slate-400">Projected Depth (3h):</span>
+                      <strong className={activeRoute.weatherForecast.projectedMaxDepth3hCm >= 16 ? "text-rose-400" : activeRoute.weatherForecast.projectedMaxDepth3hCm >= 6 ? "text-amber-400" : "text-emerald-400"}>
+                        ~{activeRoute.weatherForecast.projectedMaxDepth3hCm} cm ({activeRoute.weatherForecast.projectedStatus3h})
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Nearest Sensor Status & Proximity */}
+                  <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 pt-0.5">
+                    <span>
+                      {activeRoute.weatherForecast.nearestStationName ? (
+                        <>
+                          Nearest Station: <strong className="text-slate-300">{activeRoute.weatherForecast.nearestStationName}</strong> ({activeRoute.weatherForecast.nearestStationDistanceKm}km)
+                        </>
+                      ) : (
+                        "Open-Meteo 1.1km High-Resolution Telemetry"
+                      )}
+                    </span>
+                    <span className={`px-1.5 py-0.2 rounded text-[8.5px] ${activeRoute.weatherForecast.isStationInRadius ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-slate-800 text-slate-400"}`}>
+                      {activeRoute.weatherForecast.isStationInRadius ? "PAGASA Radius Valid" : "Meteo Grid Active"}
+                    </span>
+                  </div>
+
+                  {/* Human-Friendly Outlook Summary */}
+                  <p className="text-[9.5px] text-slate-400 leading-snug">
+                    {activeRoute.weatherForecast.summary}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

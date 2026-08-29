@@ -55,25 +55,25 @@ function runRoadRiskTests() {
   const normalRes = classifySeverity(4);
   assert(
     normalRes.severity === "NORMAL" && normalRes.hex === "#00b4d8" && normalRes.weight === 3,
-    `0-5 cm maps to NORMAL (#00b4d8, weight: 3)`
+    `0-4 cm maps to NORMAL (#00b4d8, weight: 3)`
   );
 
   const alertRes = classifySeverity(10);
   assert(
     alertRes.severity === "ALERT" && alertRes.hex === "#f97316" && alertRes.weight === 4,
-    `6-15 cm maps to ALERT (#f97316, weight: 4)`
+    `5-14 cm maps to ALERT (#f97316, weight: 4)`
   );
 
-  const alarmRes = classifySeverity(25);
+  const alarmRes = classifySeverity(20);
   assert(
     alarmRes.severity === "ALARM" && alarmRes.hex === "#ef4444" && alarmRes.weight === 5,
-    `16-30 cm maps to ALARM (#ef4444, weight: 5)`
+    `15-28 cm maps to ALARM (#ef4444, weight: 5)`
   );
 
   const criticalRes = classifySeverity(45);
   assert(
     criticalRes.severity === "CRITICAL" && criticalRes.hex === "#7f1d1d" && criticalRes.weight === 6,
-    `>30 cm maps to CRITICAL (#7f1d1d, weight: 6)`
+    `>28 cm maps to CRITICAL (#7f1d1d, weight: 6)`
   );
 
   // Test 4: Road Risk — Inland Road with Heavy Rain
@@ -238,16 +238,41 @@ function runRoadRiskTests() {
     `Identifies AWS weather station as non-riverbasin correctly`
   );
 
-  // Test district rainfall override
-  const districtRainfallTest = calculateRoadRisk(
-    sampleLineString,
-    [mockAwsStation, mockRiverStation],
-    { currentRainMmHr: 45.0, rain24hMm: 120.0 }
+  // Test 8: PAGASA Sensor Spatial Validity Radius Constraints (5-10km rainfall, 2-5km river)
+  console.log("── Test 8: Sensor Spatial Validity Radius Constraints ──");
+  const farStation: LiveStation = {
+    stationId: "far-station",
+    stationName: "Far Away Station",
+    latitude: 14.800, // ~25km away from España Blvd
+    longitude: 121.200,
+    geohash: "",
+    rain10m: 10,
+    rain1h: 60, // Heavy storm 25km away
+    rain24h: 200,
+    waterLevel: 20.0,
+    waterLevelDelta1h: 1.0,
+    waterRiskLevel: "CRITICAL",
+    rainRiskLevel: "CRITICAL",
+    riskLevel: "CRITICAL",
+    lastUpdated: new Date(),
+  };
+
+  // When only farStation is provided without district rain, effective rain is 0 because >10km
+  const farStationRisk = calculateRoadRisk(sampleLineString, [farStation]);
+  assert(
+    farStationRisk.estimatedDepthCm === 0,
+    `Station >10km away (${farStationRisk.nearestStation.distanceKm} km) is correctly ignored (0cm water depth)`
   );
 
+  // When hyper-local district rainfall is supplied, it properly takes precedence over far station
+  const localizedMeteoRisk = calculateRoadRisk(
+    sampleLineString,
+    [farStation],
+    { currentRainMmHr: 15.0, rain24hMm: 40.0 }
+  );
   assert(
-    districtRainfallTest.estimatedDepthCm > 5,
-    `Open-Meteo district rainfall (45mm/hr) elevates pluvial flood depth to ${districtRainfallTest.estimatedDepthCm} cm`
+    localizedMeteoRisk.estimatedDepthCm > 0,
+    `Hyper-local Open-Meteo rainfall accurately applies when station is out of radius (${localizedMeteoRisk.estimatedDepthCm} cm)`
   );
 
   console.log("\n✅ All Spatial Risk Matcher Unit Tests Passed Successfully!\n");

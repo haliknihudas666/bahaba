@@ -292,7 +292,7 @@ export default function HomePage() {
         roadName: road.name,
         elevationMeters: road.elevationM,
         severity,
-        color: depthCm <= 5 ? "#00b4d8" : classification.color,
+        color: depthCm < 5 ? "#00b4d8" : classification.color,
         lineWeight: severity === "CRITICAL" ? 6 : 4,
         estimatedDepthCm: depthCm,
         depthCategory: classification.label as any,

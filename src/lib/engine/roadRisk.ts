@@ -69,37 +69,37 @@ export const SEVERITY_RULES = {
   NORMAL: {
     label: "NORMAL",
     minCm: 0,
-    maxCm: 5,
+    maxCm: 4,
     hex: "#00b4d8", // Blue
     weight: 3,
-    description: "Normal / Clear (0–5 cm water predicted)",
+    description: "Normal / Clear (0–4 cm water predicted)",
     depthCategory: "Normal / Clear",
   },
   ALERT: {
     label: "ALERT",
-    minCm: 6,
-    maxCm: 15,
+    minCm: 5,
+    maxCm: 14,
     hex: "#f97316", // Orange
     weight: 4,
-    description: "Low Risk / Alert (6–15 cm / Gutter Deep)",
+    description: "Low Risk / Alert (5–14 cm / Gutter Deep)",
     depthCategory: "Gutter Deep",
   },
   ALARM: {
     label: "ALARM",
-    minCm: 16,
-    maxCm: 30,
+    minCm: 15,
+    maxCm: 28,
     hex: "#ef4444", // Red
     weight: 5,
-    description: "High Risk / Alarm (16–30 cm / Half-Tire Deep)",
+    description: "High Risk / Alarm (15–28 cm / Half-Tire Deep)",
     depthCategory: "Half-Tire Deep",
   },
   CRITICAL: {
     label: "CRITICAL",
-    minCm: 31,
+    minCm: 29,
     maxCm: Infinity,
     hex: "#7f1d1d", // Dark Red
     weight: 6,
-    description: "Critical / Impassable (>30 cm / Waist Deep+)",
+    description: "Critical / Impassable (>28 cm / Waist Deep+)",
     depthCategory: "Waist Deep+",
   },
 } as const;
@@ -185,9 +185,14 @@ const LOW_ELEVATION_PONDING_MULTIPLIER = 1.5;
 const RAINFALL_TO_DEPTH_CM = 0.15;
 
 /**
- * Distance threshold for riverbank overflow zone (km).
+ * Spatial validity radius limits for PAGASA telemetry sensors:
+ * - Rainfall AWS / Synoptic stations are valid within 5-10 km (hard cutoff at 10.0 km).
+ * - Water level / river basin gauges are strictly localized to river channels (<= 2.0 km, absolute max 5.0 km).
  */
-const RIVERBANK_ZONE_KM = 0.5;
+export const MAX_PAGASA_RAIN_RADIUS_KM = 10.0;
+export const MAX_PAGASA_WATER_LEVEL_RADIUS_KM = 2.0;
+export const RIVERBANK_ZONE_KM = 0.5;
+export const RIVERBANK_MAX_RADIUS_KM = 5.0;
 
 /**
  * Maximum fluvial overflow bonus (cm) for roads near rivers at CRITICAL.
@@ -238,7 +243,7 @@ export function isRiverGaugeStation(st: LiveStation): boolean {
 export function calculateRoadRisk(
   roadFeature: GeoJSONLineStringFeature,
   stations: LiveStation[],
-  districtRainfall?: { currentRainMmHr: number; rain24hMm: number }
+  districtRainfall?: { currentRainMmHr: number; rain24hMm: number; forecast3hTotalMm?: number; forecastPeakMmHr?: number }
 ): RoadRiskResult {
   const roadName = roadFeature.properties?.name || roadFeature.properties?.highway || "Unnamed Road";
   const roadElevation = roadFeature.properties?.elevation ?? 4.0; // Default 4.0m EL.m for low-lying urban areas
@@ -281,22 +286,29 @@ export function calculateRoadRisk(
     }
   }
 
-  // 3. Proximity Distance Decay Factor for rainfall data
-  const distanceWeight = Math.exp(-minDistanceKm / 6.0);
+  // 3. Proximity Distance Decay Factor for rainfall data with 10km spatial validity cutoff
+  const distanceWeight = minDistanceKm <= MAX_PAGASA_RAIN_RADIUS_KM
+    ? Math.exp(-minDistanceKm / 6.0)
+    : 0;
 
   // 4. Extract Telemetry Signals from Nearest Station + Optional District Rainfall
   const stationRain1h = nearestStation.rain1h ?? 0;
   const stationRain24h = nearestStation.rain24h ?? 0;
   const stationRain10m = nearestStation.rain10m ?? 0;
 
+  // Predictive rain rate: Current Rain + 3h Forecast Total
+  const meteoPredictiveRain = districtRainfall
+    ? Math.max(districtRainfall.currentRainMmHr, districtRainfall.forecastPeakMmHr ?? 0) + (districtRainfall.forecast3hTotalMm ?? 0) * 0.8
+    : 0;
+
   // Fuse Open-Meteo hyper-local district rainfall with ground-truth AWS station telemetry
   const effectiveRain1h = districtRainfall
-    ? Math.max(districtRainfall.currentRainMmHr, stationRain1h * distanceWeight)
+    ? Math.max(meteoPredictiveRain, stationRain1h * distanceWeight)
     : stationRain1h * distanceWeight;
 
   const effectiveRain24h = districtRainfall
-    ? Math.max(districtRainfall.rain24hMm, stationRain24h)
-    : stationRain24h;
+    ? Math.max(districtRainfall.rain24hMm + (districtRainfall.forecast3hTotalMm ?? 0), stationRain24h * distanceWeight)
+    : stationRain24h * distanceWeight;
 
   // 5. Pluvial Depth Estimation (Rainfall-Driven)
   const soilSaturationIndex = 1 - Math.exp(-SSI_DECAY_RATE * effectiveRain24h);
@@ -321,23 +333,26 @@ export function calculateRoadRisk(
     pluvialDepthCm += (effectiveRain10m - 5) * 0.2;
   }
 
-  // 6. Fluvial Overflow Component (River-only, Near-River Roads Only)
+  // 6. Fluvial Overflow Component (River-only, strictly localized within valid riverbank radius)
   const isNearRiver =
-    minRiverDistanceKm <= RIVERBANK_ZONE_KM ||
-    (minDistanceKm <= RIVERBANK_ZONE_KM && isRiverGaugeStation(nearestStation));
+    minRiverDistanceKm <= RIVERBANK_MAX_RADIUS_KM &&
+    (minRiverDistanceKm <= RIVERBANK_ZONE_KM ||
+      (minDistanceKm <= RIVERBANK_ZONE_KM && isRiverGaugeStation(nearestStation)));
 
   let fluvialBonusCm = 0;
 
-  if (isNearRiver && nearestRiverStation) {
+  if (isNearRiver && nearestRiverStation && minRiverDistanceKm <= RIVERBANK_MAX_RADIUS_KM) {
     const riverRisk = nearestRiverStation.riskLevel;
+    const riverProximityWeight = Math.max(0, 1 - minRiverDistanceKm / RIVERBANK_MAX_RADIUS_KM);
+
     if (riverRisk === "CRITICAL") {
-      fluvialBonusCm = FLUVIAL_OVERFLOW_MAX_BONUS_CM;
+      fluvialBonusCm = FLUVIAL_OVERFLOW_MAX_BONUS_CM * riverProximityWeight;
     } else if (riverRisk === "ALARM") {
-      fluvialBonusCm = FLUVIAL_OVERFLOW_MAX_BONUS_CM * 0.5;
+      fluvialBonusCm = FLUVIAL_OVERFLOW_MAX_BONUS_CM * 0.5 * riverProximityWeight;
     }
     // Add water level surge contribution for near-river roads
     const riverWaterDelta1h = nearestRiverStation.waterLevelDelta1h ?? 0;
-    const surgeCm = Math.max(0, riverWaterDelta1h) * 100 * 0.3;
+    const surgeCm = Math.max(0, riverWaterDelta1h) * 100 * 0.3 * riverProximityWeight;
     fluvialBonusCm += surgeCm;
   }
 
@@ -396,7 +411,7 @@ export function classifySeverity(depthCm: number): {
   weight: number;
   depthCategory: "Normal / Clear" | "Gutter Deep" | "Half-Tire Deep" | "Waist Deep+";
 } {
-  if (depthCm > 30) {
+  if (depthCm > 28) {
     return {
       severity: "CRITICAL",
       hex: SEVERITY_RULES.CRITICAL.hex,
@@ -404,7 +419,7 @@ export function classifySeverity(depthCm: number): {
       depthCategory: SEVERITY_RULES.CRITICAL.depthCategory,
     };
   }
-  if (depthCm >= 16) {
+  if (depthCm >= 15) {
     return {
       severity: "ALARM",
       hex: SEVERITY_RULES.ALARM.hex,
@@ -412,7 +427,7 @@ export function classifySeverity(depthCm: number): {
       depthCategory: SEVERITY_RULES.ALARM.depthCategory,
     };
   }
-  if (depthCm >= 6) {
+  if (depthCm >= 5) {
     return {
       severity: "ALERT",
       hex: SEVERITY_RULES.ALERT.hex,

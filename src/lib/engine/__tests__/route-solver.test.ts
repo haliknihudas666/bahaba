@@ -60,6 +60,7 @@ const clearSegments: RouteSegmentData[] = [
     hazardScore: 10,
     nearestStationName: "Test Station",
     nearestStationDistanceKm: 1,
+    isStationInRadius: true,
     segmentDistanceKm: 1.0,
   },
 ];
@@ -92,6 +93,7 @@ const floodedSegments: RouteSegmentData[] = [
     hazardScore: 80,
     nearestStationName: "Test Station",
     nearestStationDistanceKm: 0.5,
+    isStationInRadius: true,
     segmentDistanceKm: 2.0,
   },
 ];
@@ -117,6 +119,7 @@ const dryWalkSegments: RouteSegmentData[] = [
     hazardScore: 5,
     nearestStationName: "Test Station",
     nearestStationDistanceKm: 2,
+    isStationInRadius: true,
     segmentDistanceKm: 2.7,
     walkSlowdownFactor: 1.0,
   },
@@ -147,6 +150,7 @@ const kneeDeepSegments: RouteSegmentData[] = [
     hazardScore: 70,
     nearestStationName: "Test Station",
     nearestStationDistanceKm: 0.3,
+    isStationInRadius: true,
     segmentDistanceKm: 1.0,
     walkSlowdownFactor: 3.2,
   },
@@ -173,6 +177,7 @@ const waistDeepSegments: RouteSegmentData[] = [
     hazardScore: 95,
     nearestStationName: "River Station",
     nearestStationDistanceKm: 0.2,
+    isStationInRadius: true,
     segmentDistanceKm: 1.0,
     walkSlowdownFactor: 5.0,
   },
@@ -182,7 +187,41 @@ assert(waistDeepWalk.isWalkable === false, "38cm depth is marked as NOT walkable
 assert(waistDeepWalk.category === "IMPASSABLE_DANGEROUS", "38cm depth maps to IMPASSABLE_DANGEROUS");
 assert(waistDeepWalk.score <= 20, "Critical flood depth yields very low walkability score");
 
+// 4. Open-Meteo & PAGASA 3-Hour Rainfall Forecast & Flood Depth Projection
+console.log("\n── Test 4: 3-Hour Rainfall Forecast & Projected Flood Progression ──");
+import { predictProjectedFloodDepth } from "../floodPredictor";
+import { computeRainfallTrend, computeConditionLabel } from "@/lib/geo/meteo-rainfall";
+
+// Trend calculation tests
+const worseningTrend = computeRainfallTrend(2.0, 8.0, 18.0, 25.0);
+assert(worseningTrend === "WORSENING", "Increasing rainfall (+18mm, +25mm) is classified as WORSENING");
+
+const improvingTrend = computeRainfallTrend(20.0, 5.0, 2.0, 0.0);
+assert(improvingTrend === "IMPROVING", "Tapering rainfall is classified as IMPROVING");
+
+const dryTrend = computeRainfallTrend(0.0, 0.0, 0.0, 0.0);
+assert(dryTrend === "DRY", "Zero rainfall is classified as DRY");
+
+// Condition label tests
+const torrentialLabel = computeConditionLabel(30, 60, 35, "WORSENING");
+assert(torrentialLabel === "Torrential Rain Alert", "Severe incoming rainfall generates Torrential Rain Alert");
+
+// Projected Flood Depth tests
+// Scenario A: Low-lying road (elev 2.0m, NOAH level 2) currently clear (2cm), but +35mm incoming in 3h
+const projectedSevere = predictProjectedFloodDepth(2, 2, 35, 25, 2, 2.0, 25);
+assert(
+  projectedSevere > 15,
+  `Incoming heavy rain (+35mm) projects flood depth escalation from 2cm to ${projectedSevere}cm (>15cm / High Risk)`
+);
+
+// Scenario B: Road currently flooded (20cm), but rain completely stops (0mm in 3h)
+const projectedReceding = predictProjectedFloodDepth(20, 0, 0, 0, 0, 6.0, 25);
+assert(
+  projectedReceding < 20,
+  `Dry forecast allows standing water to recede from 20cm down to ${projectedReceding}cm`
+);
+
 console.log("\n════════════════════════════════════════════════════════════");
-console.log("  All Route Solver & Walkability Tests Passed Successfully! ");
+console.log("  All Route Solver, Forecast & Walkability Tests Passed! ");
 console.log("════════════════════════════════════════════════════════════\n");
 

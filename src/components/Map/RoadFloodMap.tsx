@@ -352,7 +352,7 @@ export default function RoadFloodMap({
               routeSegments &&
                 routeSegments.some(
                   (s) =>
-                    (s.depthCm && s.depthCm >= 6) ||
+                    (s.depthCm && s.depthCm >= 5) ||
                     s.severity === "CRITICAL" ||
                     s.severity === "ALARM" ||
                     s.severity === "ALERT"
@@ -475,6 +475,8 @@ export default function RoadFloodMap({
         if (routeSegments && routeSegments.length > 0) {
           routeSegments.forEach((segment) => {
             if (!segment.coordinates || segment.coordinates.length < 2) return;
+            const isFlooded = segment.severity !== "NORMAL" || (segment.depthCm && segment.depthCm >= 5);
+            if (!isFlooded) return;
 
             const validCoords = segment.coordinates.filter(
               (c) =>
@@ -513,7 +515,7 @@ export default function RoadFloodMap({
               }).addTo(routeGroup);
 
               segPolyline.bindPopup(`
-                <div style="font-family: sans-serif; padding: 4px; color: #0f172a; min-width: 190px;">
+                <div style="font-family: sans-serif; padding: 4px; color: #0f172a; min-width: 205px;">
                   <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                     <strong style="font-size: 13px;">🌊 Flooded Segment</strong>
                     <span style="
@@ -525,11 +527,15 @@ export default function RoadFloodMap({
                       border-radius: 9999px;
                     ">${segment.severity}</span>
                   </div>
-                  <div style="font-size: 11px; margin-top: 6px; color: #334155;">
-                    <div>Estimated Depth: <strong style="color: ${segment.color};">${segment.depthCm} cm</strong> (${segment.depthCategory})</div>
+                  <div style="font-size: 11px; margin-top: 6px; color: #334155; line-height: 1.5;">
+                    <div>Estimated Depth (Now): <strong style="color: ${segment.color};">${segment.depthCm} cm</strong> (${segment.depthCategory})</div>
+                    ${segment.projectedDepth3hCm !== undefined ? `<div>Projected Depth (3h): <strong>${segment.projectedDepth3hCm} cm</strong></div>` : ""}
+                    ${segment.forecast3hTotalMm !== undefined && segment.forecast3hTotalMm > 0 ? `<div>3h Rain Forecast: <strong>+${segment.forecast3hTotalMm} mm</strong> (${segment.forecastTrend || "Steady"})</div>` : ""}
                     <div>Elevation: <strong>${segment.elevationM.toFixed(1)} m</strong></div>
-                    <div>1h Rain at Station: <strong>${segment.rainMmHr} mm/h</strong></div>
-                    <div>Nearest Station: <strong>${segment.nearestStationName}</strong> (${segment.nearestStationDistanceKm} km)</div>
+                    <div>1h Rain: <strong>${segment.rainMmHr} mm/h</strong></div>
+                    <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+                      Station: <strong>${segment.nearestStationName}</strong> (${segment.nearestStationDistanceKm} km ${segment.isStationInRadius ? "• Valid" : "• Meteo Grid"})
+                    </div>
                   </div>
                 </div>
               `);

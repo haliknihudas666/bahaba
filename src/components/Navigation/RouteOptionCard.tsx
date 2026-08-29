@@ -66,11 +66,11 @@ export default function RouteOptionCard({
           <span className="text-slate-400 text-[10px]">Max Flood:</span>
           <span
             className={`font-extrabold px-1.5 py-0.5 rounded-full text-[9px] ${
-              option.maxFloodDepthCm > 30
+              option.maxFloodDepthCm > 28
                 ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse"
-                : option.maxFloodDepthCm >= 16
+                : option.maxFloodDepthCm >= 15
                   ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
-                  : option.maxFloodDepthCm >= 6
+                  : option.maxFloodDepthCm >= 5
                     ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                     : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
             }`}
@@ -116,6 +116,31 @@ export default function RouteOptionCard({
                 (+{option.walkability.wadingDelayMin}m wade)
               </span>
             )}
+          </div>
+        )}
+
+        {/* 3-Hour Rainfall Forecast Outlook Badge */}
+        {option.weatherForecast && (
+          <div className="flex items-center gap-1">
+            <span
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                option.weatherForecast.trend === "WORSENING" && option.weatherForecast.forecast3hTotalMm >= 15
+                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse"
+                  : option.weatherForecast.trend === "WORSENING"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                  : option.weatherForecast.trend === "IMPROVING"
+                  ? "bg-teal-500/20 text-teal-300 border border-teal-500/40"
+                  : option.weatherForecast.currentRainMmHr > 0 || option.weatherForecast.forecast3hTotalMm > 0
+                  ? "bg-sky-500/20 text-sky-300 border border-sky-500/40"
+                  : "bg-slate-800 text-slate-400 border border-slate-700"
+              }`}
+            >
+              {option.weatherForecast.forecast3hTotalMm >= 15
+                ? `⛈️ 3h: +${option.weatherForecast.forecast3hTotalMm}mm`
+                : option.weatherForecast.forecast3hTotalMm > 0
+                ? `🌦️ 3h: +${option.weatherForecast.forecast3hTotalMm}mm`
+                : `☀️ Dry 3h`}
+            </span>
           </div>
         )}
       </div>

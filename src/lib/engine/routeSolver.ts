@@ -12,9 +12,24 @@ import { getElevationsForCoordinates } from "@/lib/geo/elevation";
 import {
   calculateHaversineDistance,
   classifySeverity,
+  MAX_PAGASA_RAIN_RADIUS_KM,
+  MAX_PAGASA_WATER_LEVEL_RADIUS_KM,
+  RIVERBANK_ZONE_KM,
+  isRiverGaugeStation,
   type RoadSeverity,
 } from "./roadRisk";
-import { calculateWaterDepth, classifyFloodRisk } from "./floodPredictor";
+import {
+  calculateWaterDepth,
+  classifyFloodRisk,
+  predictProjectedFloodDepth,
+} from "./floodPredictor";
+import {
+  batchFetchDistrictRainfall,
+  toGridKey,
+  computeConditionLabel,
+  type DistrictRainfall,
+  type RainfallTrend,
+} from "@/lib/geo/meteo-rainfall";
 
 export type TravelMode = "driving" | "walking";
 
@@ -132,6 +147,24 @@ export interface RouteVehiclePassability {
   statusLevel: "SAFE" | "CAUTION" | "IMPASSABLE";
 }
 
+export interface RouteWeatherForecast {
+  currentRainMmHr: number;
+  forecast1hMm: number;
+  forecast2hMm: number;
+  forecast3hMm: number;
+  forecast3hTotalMm: number;
+  forecastPeakMmHr: number;
+  precipProbabilityMax: number;
+  trend: RainfallTrend;
+  conditionLabel: string;
+  summary: string;
+  projectedMaxDepth3hCm: number;
+  projectedStatus3h: "SAFE" | "CAUTION" | "HIGH_RISK" | "IMPASSABLE";
+  nearestStationName?: string;
+  nearestStationDistanceKm?: number;
+  isStationInRadius?: boolean;
+}
+
 export interface RouteOption {
   id: string;
   mode: TravelMode;
@@ -148,6 +181,7 @@ export interface RouteOption {
   traffic?: RouteTrafficData;
   walkability?: RouteWalkabilityData;
   vehiclePassability?: RouteVehiclePassability;
+  weatherForecast?: RouteWeatherForecast;
 }
 
 export interface RouteSegmentData {
@@ -155,6 +189,14 @@ export interface RouteSegmentData {
   elevationM: number;
   rainMmHr: number;
   rain24hMm: number;
+  forecast1hMm?: number;
+  forecast2hMm?: number;
+  forecast3hMm?: number;
+  forecast3hTotalMm?: number;
+  forecastPeakMmHr?: number;
+  precipProbability?: number;
+  projectedDepth3hCm?: number;
+  forecastTrend?: RainfallTrend;
   severity: RoadSeverity;
   color: string;
   depthCm: number;
@@ -163,6 +205,7 @@ export interface RouteSegmentData {
   hazardScore: number;
   nearestStationName: string;
   nearestStationDistanceKm: number;
+  isStationInRadius: boolean;
   segmentDistanceKm: number;
   trafficLevel?: TrafficLevel;
   isWalkableSegment?: boolean;
@@ -231,7 +274,7 @@ export async function fetchAndEvaluateRoute(
           baseDurationMin = Math.max(urbanBaseMin, Math.max(1, Math.round((rt.duration || 0) / 60)));
         }
 
-        // Steps 2, 3, 4: Segment polyline, fetch elevation, check rainfall & predict flooding
+        // Steps 2, 3, 4: Segment polyline, fetch elevation, check Open-Meteo & PAGASA rainfall, predict flooding
         const segmented = await segmentPolylineWithFloodRisk(rawCoords, stations, mode);
 
         let maxFloodDepthCm = 0;
@@ -259,13 +302,79 @@ export async function fetchAndEvaluateRoute(
         });
 
         let overallStatus: "SAFE" | "CAUTION" | "HIGH_RISK" | "IMPASSABLE" = "SAFE";
-        if (maxFloodDepthCm > 30) {
+        if (maxFloodDepthCm > 28) {
           overallStatus = "IMPASSABLE";
-        } else if (maxFloodDepthCm >= 16) {
+        } else if (maxFloodDepthCm >= 15) {
           overallStatus = "HIGH_RISK";
-        } else if (maxFloodDepthCm >= 6) {
+        } else if (maxFloodDepthCm >= 5) {
           overallStatus = "CAUTION";
         }
+
+        // -------------------------------------------------------------------
+        // 3-Hour Weather Forecast & Flood Progression Aggregation
+        // -------------------------------------------------------------------
+        const segCount = Math.max(1, segmented.length);
+        const peakCurrentRain = Math.round(Math.max(...segmented.map((s) => s.rainMmHr), 0) * 10) / 10;
+        const avgForecast1h = Math.round((segmented.reduce((sum, s) => sum + (s.forecast1hMm ?? 0), 0) / segCount) * 10) / 10;
+        const avgForecast2h = Math.round((segmented.reduce((sum, s) => sum + (s.forecast2hMm ?? 0), 0) / segCount) * 10) / 10;
+        const avgForecast3h = Math.round((segmented.reduce((sum, s) => sum + (s.forecast3hMm ?? 0), 0) / segCount) * 10) / 10;
+        const maxForecast3hTotal = Math.round(Math.max(...segmented.map((s) => s.forecast3hTotalMm ?? 0), 0) * 10) / 10;
+        const peakForecastRate = Math.round(Math.max(...segmented.map((s) => s.forecastPeakMmHr ?? s.rainMmHr), peakCurrentRain) * 10) / 10;
+        const maxPrecipProb = Math.max(...segmented.map((s) => s.precipProbability ?? 0), 0);
+        const projectedMaxDepth3hCm = Math.max(...segmented.map((s) => s.projectedDepth3hCm ?? s.depthCm), 0);
+
+        let projectedStatus3h: "SAFE" | "CAUTION" | "HIGH_RISK" | "IMPASSABLE" = "SAFE";
+        if (projectedMaxDepth3hCm > 28) {
+          projectedStatus3h = "IMPASSABLE";
+        } else if (projectedMaxDepth3hCm >= 15) {
+          projectedStatus3h = "HIGH_RISK";
+        } else if (projectedMaxDepth3hCm >= 5) {
+          projectedStatus3h = "CAUTION";
+        }
+
+        let overallTrend: RainfallTrend = "DRY";
+        if (segmented.some((s) => s.forecastTrend === "WORSENING")) {
+          overallTrend = "WORSENING";
+        } else if (segmented.some((s) => s.forecastTrend === "IMPROVING")) {
+          overallTrend = "IMPROVING";
+        } else if (segmented.some((s) => s.forecastTrend === "STEADY")) {
+          overallTrend = "STEADY";
+        }
+
+        const conditionLabel = computeConditionLabel(peakCurrentRain, maxForecast3hTotal, peakForecastRate, overallTrend);
+
+        let forecastSummary = "Clear weather projected over the next 3 hours.";
+        if (overallTrend === "WORSENING" && (peakForecastRate >= 15 || maxForecast3hTotal >= 20)) {
+          forecastSummary = `⚠️ Torrential Rain Expected (+${maxForecast3hTotal}mm in 3h). Flood depths along low-lying segments may rise to ~${projectedMaxDepth3hCm}cm (${projectedStatus3h}).`;
+          if (!warnings.some((w) => w.includes("3-Hour Forecast"))) {
+            warnings.push(`⛈️ 3-Hour Forecast Alert: Heavy rainfall (+${maxForecast3hTotal}mm) projected to elevate flood depth to ${projectedMaxDepth3hCm}cm within 1-2 hours.`);
+          }
+        } else if (overallTrend === "WORSENING") {
+          forecastSummary = `🌧️ Rain incoming (+${maxForecast3hTotal}mm in 3h). Projected water depth ~${projectedMaxDepth3hCm}cm.`;
+        } else if (overallTrend === "IMPROVING" && maxFloodDepthCm > 0) {
+          forecastSummary = `🌦️ Rain easing. Standing flood depths projected to gradually recede over the next 1-3 hours.`;
+        } else if (peakCurrentRain > 0) {
+          forecastSummary = `Steady rain (${peakCurrentRain} mm/hr). Projected 3h depth ~${projectedMaxDepth3hCm}cm.`;
+        }
+
+        const primarySeg = segmented[0];
+        const weatherForecast: RouteWeatherForecast = {
+          currentRainMmHr: peakCurrentRain,
+          forecast1hMm: avgForecast1h,
+          forecast2hMm: avgForecast2h,
+          forecast3hMm: avgForecast3h,
+          forecast3hTotalMm: maxForecast3hTotal,
+          forecastPeakMmHr: peakForecastRate,
+          precipProbabilityMax: maxPrecipProb,
+          trend: overallTrend,
+          conditionLabel,
+          summary: forecastSummary,
+          projectedMaxDepth3hCm,
+          projectedStatus3h,
+          nearestStationName: primarySeg?.nearestStationName,
+          nearestStationDistanceKm: primarySeg?.nearestStationDistanceKm,
+          isStationInRadius: primarySeg?.isStationInRadius,
+        };
 
         // -------------------------------------------------------------------
         // Vehicle Mode Calculations (Traffic & Clearance)
@@ -315,6 +424,7 @@ export async function fetchAndEvaluateRoute(
           traffic,
           walkability,
           vehiclePassability,
+          weatherForecast,
         };
       })
     );
@@ -330,7 +440,7 @@ export async function fetchAndEvaluateRoute(
  * Splits a dense polyline [lat, lng][] into sub-segments (~300m length)
  * and executes:
  *   - Step 2: Sampling elevations (EL.m) via DEM
- *   - Step 3: Interpolating rainfall mm/hr & 24h accumulation from stations
+ *   - Step 3: Interpolating Open-Meteo current + 3h forecast and PAGASA telemetry
  *   - Step 4: Predicting standing water depth, drivability, walkability, and risk category
  */
 export async function segmentPolylineWithFloodRisk(
@@ -375,15 +485,20 @@ export async function segmentPolylineWithFloodRisk(
 
   // Step 2: Sample elevations for all segment centroids in batch
   const centroidCoords: [number, number][] = rawSegments.map((s) => [s.centLat, s.centLng]);
-  const elevations = await getElevationsForCoordinates(centroidCoords);
+  const [elevations, meteoMap] = await Promise.all([
+    getElevationsForCoordinates(centroidCoords),
+    batchFetchDistrictRainfall(centroidCoords.map(([lat, lng]) => ({ lat, lng }))),
+  ]);
 
   const segments: RouteSegmentData[] = [];
 
   for (let idx = 0; idx < rawSegments.length; idx++) {
     const { chunk, centLat, centLng, segDistKm } = rawSegments[idx];
     const roadElevation = elevations[idx] ?? 4.0;
+    const gridKey = toGridKey(centLat, centLng);
+    const meteoData = meteoMap.get(gridKey);
 
-    // Step 3: Check all rainfall mm/hr along the way & around the area
+    // Step 3: Check PAGASA stations within valid spatial radius
     let nearestSt: LiveStation | null = null;
     let minDist = Infinity;
 
@@ -398,55 +513,91 @@ export async function segmentPolylineWithFloodRisk(
       }
     }
 
-    let nearestStationName = "Weather Telemetry";
+    let nearestStationName = "Open-Meteo 1.1km Grid";
     let nearestStationDistKm = 0;
-    let rainMmHr = 0;
-    let rain24hMm = 0;
+    const isStationInRadius = minDist <= MAX_PAGASA_RAIN_RADIUS_KM;
+
+    let stationRain1h = 0;
+    let stationRain24h = 0;
     let waterDelta1h = 0;
     let stRiskLevel = "NORMAL";
 
     if (nearestSt) {
       nearestStationName = nearestSt.stationName;
       nearestStationDistKm = Number(minDist.toFixed(1));
-      // Distance decay weight (effective rainfall influence radius)
-      const distWeight = Math.exp(-minDist / 8.0);
-      rainMmHr = Math.round((nearestSt.rain1h ?? 0) * distWeight * 10) / 10;
-      rain24hMm = Math.round((nearestSt.rain24h ?? 0) * distWeight * 10) / 10;
-      waterDelta1h = nearestSt.waterLevelDelta1h ?? 0;
-      stRiskLevel = nearestSt.riskLevel ?? "NORMAL";
+
+      if (isStationInRadius) {
+        // Distance decay factor within valid 10km radius
+        const distWeight = Math.exp(-minDist / 6.0);
+        stationRain1h = (nearestSt.rain1h ?? 0) * distWeight;
+        stationRain24h = (nearestSt.rain24h ?? 0) * distWeight;
+        waterDelta1h = nearestSt.waterLevelDelta1h ?? 0;
+        stRiskLevel = nearestSt.riskLevel ?? "NORMAL";
+      }
     }
 
-    // Step 4: Calculate elevation, rainfall, drainage, and hazard
-    // Base drainage capacity for urban corridor: 25 mm/hr (adjusted by elevation)
-    const baseDrainage = roadElevation <= 3.0 ? 18 : roadElevation <= 6.0 ? 25 : 32;
+    // Blend Open-Meteo hyper-local current rainfall with nearby PAGASA AWS ground truth
+    const meteoCurrentRain = meteoData?.currentRainMmHr ?? 0;
+    const meteoRain24h = meteoData?.rain24hMm ?? 0;
 
-    // NOAH hazard estimate based on low-lying profile
+    const rainMmHr = Math.round(Math.max(meteoCurrentRain, stationRain1h) * 10) / 10;
+    const rain24hMm = Math.round(Math.max(meteoRain24h, stationRain24h) * 10) / 10;
+
+    // 3-Hour Forecast Data from Open-Meteo
+    const forecast1hMm = meteoData?.forecast1hMm ?? rainMmHr;
+    const forecast2hMm = meteoData?.forecast2hMm ?? forecast1hMm;
+    const forecast3hMm = meteoData?.forecast3hMm ?? forecast2hMm;
+    const forecast3hTotalMm = meteoData?.forecast3hTotalMm ?? Math.round((forecast1hMm + forecast2hMm + forecast3hMm) * 10) / 10;
+    const forecastPeakMmHr = meteoData?.forecastPeakMmHr ?? Math.max(rainMmHr, forecast1hMm, forecast2hMm, forecast3hMm);
+    const forecastTrend = meteoData?.trend ?? (forecast3hTotalMm > rainMmHr * 2 ? "WORSENING" : "DRY");
+    const precipProbability = meteoData?.precipProbability ?? (rainMmHr > 0 ? 85 : 10);
+
+    // Step 4: Calculate elevation, predictive rainfall (Current + 3h Forecast), drainage, and hazard
+    const baseDrainage = roadElevation <= 3.0 ? 18 : roadElevation <= 6.0 ? 25 : 32;
     const inferredNoahHazard =
       roadElevation <= 2.2 ? 3 : roadElevation <= 3.5 ? 2 : roadElevation <= 6.0 ? 1 : 0;
 
+    // Fused predictive rainfall: current rain rate + 3-hour forecasted rainfall accumulation
+    const predictiveRainRate = Math.max(rainMmHr, forecastPeakMmHr) + forecast3hTotalMm * 0.8;
+    const predictiveRain24h = rain24hMm + forecast3hTotalMm;
+
     let depthCm = calculateWaterDepth(
-      rainMmHr,
-      rain24hMm,
+      predictiveRainRate,
+      predictiveRain24h,
       inferredNoahHazard,
       roadElevation,
       baseDrainage
     );
 
-    // Fluvial surge if within 500m of a river gauge at alert/critical
-    if (minDist <= 0.5 && (stRiskLevel === "CRITICAL" || stRiskLevel === "ALARM")) {
-      const riverBonus = stRiskLevel === "CRITICAL" ? 18 : 8;
-      const surgeBonus = Math.max(0, waterDelta1h) * 100 * 0.25;
-      depthCm = Math.round(depthCm + riverBonus + surgeBonus);
+    // Fluvial surge if strictly within MAX_PAGASA_WATER_LEVEL_RADIUS_KM (<=2.0 km) of active river gauge
+    if (minDist <= MAX_PAGASA_WATER_LEVEL_RADIUS_KM && nearestSt && isRiverGaugeStation(nearestSt)) {
+      if (stRiskLevel === "CRITICAL" || stRiskLevel === "ALARM") {
+        const riverBonus = stRiskLevel === "CRITICAL" ? 18 : 8;
+        const surgeBonus = Math.max(0, waterDelta1h) * 100 * 0.25;
+        const riverProximityWeight = Math.max(0, 1 - minDist / MAX_PAGASA_WATER_LEVEL_RADIUS_KM);
+        depthCm = Math.round(depthCm + (riverBonus + surgeBonus) * riverProximityWeight);
+      }
     }
+
+    // Calculate Projected 3-Hour Flood Depth
+    const projectedDepth3hCm = predictProjectedFloodDepth(
+      depthCm,
+      predictiveRainRate,
+      forecast3hTotalMm,
+      forecastPeakMmHr,
+      inferredNoahHazard,
+      roadElevation,
+      baseDrainage
+    );
 
     const classification = classifyFloodRisk(depthCm);
     const severityClassification = classifySeverity(depthCm);
 
-    // Color: #2563eb for Normal / Clear (0-5cm), else severity color
-    const color = depthCm <= 5 ? (mode === "walking" ? "#06b6d4" : "#2563eb") : classification.color;
+    // Color: #2563eb for Normal / Clear (0-4cm), else severity color (#f97316 for 5-14cm, #ef4444 for 15-28cm, #7f1d1d for >28cm)
+    const color = depthCm < 5 ? (mode === "walking" ? "#06b6d4" : "#2563eb") : classification.color;
 
     // Composite Hazard Score (0-100)
-    const rainFactor = Math.min(1.0, rainMmHr / 30.0);
+    const rainFactor = Math.min(1.0, predictiveRainRate / 30.0);
     const depthFactor = Math.min(1.0, depthCm / 50.0);
     const elevFactor = Math.max(0, 1.0 - roadElevation / 20.0);
     const hazardScore = Math.round(
@@ -455,23 +606,23 @@ export async function segmentPolylineWithFloodRisk(
 
     // Traffic calculation for segment
     let trafficLevel: TrafficLevel = "SMOOTH";
-    if (depthCm > 30) {
+    if (depthCm > 28) {
       trafficLevel = "STANDSTILL";
-    } else if (depthCm >= 16) {
+    } else if (depthCm >= 15) {
       trafficLevel = "HEAVY";
-    } else if (depthCm >= 6) {
+    } else if (depthCm >= 5) {
       trafficLevel = "MODERATE";
     }
 
     // Walking calculation for segment
     const isWalkableSegment = depthCm <= 25;
     let walkSlowdownFactor = 1.0;
-    if (depthCm > 25) {
-      walkSlowdownFactor = 4.0;
-    } else if (depthCm >= 16) {
-      walkSlowdownFactor = 2.4;
-    } else if (depthCm >= 6) {
-      walkSlowdownFactor = 1.4;
+    if (depthCm > 28) {
+      walkSlowdownFactor = 4.5;
+    } else if (depthCm >= 15) {
+      walkSlowdownFactor = 2.5;
+    } else if (depthCm >= 5) {
+      walkSlowdownFactor = 1.5;
     }
 
     segments.push({
@@ -479,6 +630,14 @@ export async function segmentPolylineWithFloodRisk(
       elevationM: roadElevation,
       rainMmHr,
       rain24hMm,
+      forecast1hMm,
+      forecast2hMm,
+      forecast3hMm,
+      forecast3hTotalMm,
+      forecastPeakMmHr,
+      precipProbability,
+      projectedDepth3hCm,
+      forecastTrend,
       severity: severityClassification.severity,
       color,
       depthCm,
@@ -487,6 +646,7 @@ export async function segmentPolylineWithFloodRisk(
       hazardScore,
       nearestStationName,
       nearestStationDistanceKm: nearestStationDistKm,
+      isStationInRadius,
       segmentDistanceKm: segDistKm,
       trafficLevel,
       isWalkableSegment,
@@ -834,6 +994,31 @@ async function createFallbackRoute(
     durationMin = walkability.adjustedDurationMin;
   }
 
+  const segCount = Math.max(1, segmented.length);
+  const peakCurrentRain = Math.round(Math.max(...segmented.map((s) => s.rainMmHr), 0) * 10) / 10;
+  const maxForecast3hTotal = Math.round(Math.max(...segmented.map((s) => s.forecast3hTotalMm ?? 0), 0) * 10) / 10;
+  const peakForecastRate = Math.round(Math.max(...segmented.map((s) => s.forecastPeakMmHr ?? s.rainMmHr), peakCurrentRain) * 10) / 10;
+  const projectedMaxDepth3hCm = Math.max(...segmented.map((s) => s.projectedDepth3hCm ?? s.depthCm), 0);
+
+  const weatherForecast: RouteWeatherForecast = {
+    currentRainMmHr: peakCurrentRain,
+    forecast1hMm: Math.round((segmented.reduce((sum, s) => sum + (s.forecast1hMm ?? 0), 0) / segCount) * 10) / 10,
+    forecast2hMm: Math.round((segmented.reduce((sum, s) => sum + (s.forecast2hMm ?? 0), 0) / segCount) * 10) / 10,
+    forecast3hMm: Math.round((segmented.reduce((sum, s) => sum + (s.forecast3hMm ?? 0), 0) / segCount) * 10) / 10,
+    forecast3hTotalMm: maxForecast3hTotal,
+    forecastPeakMmHr: peakForecastRate,
+    precipProbabilityMax: Math.max(...segmented.map((s) => s.precipProbability ?? 0), 0),
+    trend: segmented.some((s) => s.forecastTrend === "WORSENING")
+      ? "WORSENING"
+      : segmented.some((s) => s.forecastTrend === "IMPROVING")
+      ? "IMPROVING"
+      : "DRY",
+    conditionLabel: computeConditionLabel(peakCurrentRain, maxForecast3hTotal, peakForecastRate, "DRY"),
+    summary: peakCurrentRain > 0 ? `Rainfall ~${peakCurrentRain} mm/hr along corridor.` : "Clear weather conditions along corridor.",
+    projectedMaxDepth3hCm,
+    projectedStatus3h: projectedMaxDepth3hCm > 28 ? "IMPASSABLE" : projectedMaxDepth3hCm >= 15 ? "HIGH_RISK" : projectedMaxDepth3hCm >= 5 ? "CAUTION" : "SAFE",
+  };
+
   return {
     id: `route-${mode}-fallback`,
     mode,
@@ -846,17 +1031,18 @@ async function createFallbackRoute(
     maxFloodDepthCm,
     totalFloodedKm: 0,
     overallStatus:
-      maxFloodDepthCm > 30
+      maxFloodDepthCm > 28
         ? "IMPASSABLE"
-        : maxFloodDepthCm >= 16
+        : maxFloodDepthCm >= 15
         ? "HIGH_RISK"
-        : maxFloodDepthCm >= 6
+        : maxFloodDepthCm >= 5
         ? "CAUTION"
         : "SAFE",
     warnings: [],
     traffic,
     walkability,
     vehiclePassability,
+    weatherForecast,
   };
 }
 
