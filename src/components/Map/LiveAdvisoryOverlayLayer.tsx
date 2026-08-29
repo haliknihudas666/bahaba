@@ -5,8 +5,9 @@
 // Renders glowing, pulsing ground-truth flood markers from official MMDA/NDRRMC reports.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReportedAdvisory } from "@/types/advisory";
+import { isAdvisoryPinVisible } from "@/types/advisory";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 function formatTimeAgo(isoString: string): string {
@@ -52,6 +53,14 @@ export default function LiveAdvisoryOverlayLayer({
 
   const lastDirectClickedIdRef = useRef<string | null>(null);
 
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
   // 1. Initialize Layer Group and render markers when advisories list changes
   useEffect(() => {
     const L = (window as any).L;
@@ -67,12 +76,15 @@ export default function LiveAdvisoryOverlayLayer({
       const layerGroup = layerGroupRef.current;
       markersMapRef.current.clear();
 
+      const now = Date.now();
+
       advisories.forEach((advisory) => {
-        if (!advisory.coordinates || !advisory.coordinates.lat || !advisory.coordinates.lng) {
+        // Enforce 6-hour map visibility cutoff
+        if (!isAdvisoryPinVisible(advisory, now)) {
           return;
         }
 
-        const { lat, lng } = advisory.coordinates;
+        const { lat, lng } = advisory.coordinates!;
         const isCritical = advisory.severity === "CRITICAL";
         const isAlarm = advisory.severity === "ALARM";
         const isSubsided = advisory.status === "SUBSIDED";
@@ -170,7 +182,7 @@ export default function LiveAdvisoryOverlayLayer({
     } catch (err) {
       console.warn("[LiveAdvisoryOverlayLayer render error]", err);
     }
-  }, [map, mapLoaded, advisories]);
+  }, [map, mapLoaded, advisories, tick]);
 
   // Clean up layer group on map destruction or component unmount
   useEffect(() => {

@@ -8,6 +8,7 @@
 
 import { useState, useMemo } from "react";
 import type { ReportedAdvisory } from "@/types/advisory";
+import { isAdvisoryPinVisible } from "@/types/advisory";
 
 function formatTimeAgo(isoString: string): string {
   try {
@@ -368,16 +369,30 @@ export default function AdvisoryWallModal({
                   {/* Bottom Action Footer */}
                   <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-between">
                     {advisory.coordinates ? (
-                      <button
-                        onClick={() => {
-                          onSelectAdvisory(advisory);
-                          onClose();
-                        }}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-400 hover:text-cyan-300 bg-cyan-950/40 hover:bg-cyan-950/70 border border-cyan-500/30 px-3 py-1 rounded-xl transition-all"
-                      >
-                        <span>📍</span>
-                        <span>Locate on Map</span>
-                      </button>
+                      (() => {
+                        const hasLivePin = isAdvisoryPinVisible(advisory);
+                        return (
+                          <button
+                            onClick={() => {
+                              onSelectAdvisory(advisory);
+                              onClose();
+                            }}
+                            className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-xl transition-all border ${
+                              hasLivePin
+                                ? "text-cyan-400 hover:text-cyan-300 bg-cyan-950/40 hover:bg-cyan-950/70 border-cyan-500/30 shadow-sm"
+                                : "text-slate-400 hover:text-slate-200 bg-slate-800/40 hover:bg-slate-800/70 border-slate-700/50"
+                            }`}
+                            title={
+                              hasLivePin
+                                ? "Locate live advisory pin on map (active within 6 hours)"
+                                : "Report is older than 6 hours (pin is hidden on map). Click to pan to coordinates."
+                            }
+                          >
+                            <span>📍</span>
+                            <span>{hasLivePin ? "Locate on Map" : "Locate on Map (Expired >6h)"}</span>
+                          </button>
+                        );
+                      })()
                     ) : (
                       <span className="text-[11px] text-slate-500">General Bulletin</span>
                     )}

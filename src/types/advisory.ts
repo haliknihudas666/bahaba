@@ -66,3 +66,30 @@ export interface AdvisorySyncResult {
     sourceBreakdown: Record<string, number>;
   };
 }
+
+/** Maximum validity duration for advisory pins on the map (6 hours) */
+export const ADVISORY_MAP_PIN_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours (21,600,000 ms)
+
+/**
+ * Determines whether a reported advisory should be visible as a pin on the map.
+ * Pins are only visible if they have valid geographic coordinates and were published
+ * within the last 6 hours.
+ */
+export function isAdvisoryPinVisible(
+  advisory: ReportedAdvisory,
+  now: number = Date.now()
+): boolean {
+  if (!advisory.coordinates || !advisory.coordinates.lat || !advisory.coordinates.lng) {
+    return false;
+  }
+  if (!advisory.publishedAt) {
+    return false;
+  }
+  const publishedMs = new Date(advisory.publishedAt).getTime();
+  if (isNaN(publishedMs)) {
+    return false;
+  }
+  const ageMs = now - publishedMs;
+  // Valid if published within the 6-hour window (with 60-second tolerance for slight clock drift)
+  return ageMs >= -60_000 && ageMs <= ADVISORY_MAP_PIN_MAX_AGE_MS;
+}
