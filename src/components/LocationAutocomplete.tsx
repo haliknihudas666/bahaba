@@ -66,9 +66,7 @@ export default function LocationAutocomplete({
     const timer = setTimeout(async () => {
       setLoadingRemote(true);
       try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          trimmed + " Metro Manila Philippines"
-        )}&countrycodes=ph&limit=6`;
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&countrycodes=ph&limit=10`;
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
@@ -79,7 +77,7 @@ export default function LocationAutocomplete({
               return {
                 id: `nominatim-${idx}-${item.place_id}`,
                 name: namePart,
-                subtext: subtextParts || "Metro Manila, Philippines",
+                subtext: subtextParts || " Philippines",
                 category: "landmark" as const,
                 coords: [parseFloat(item.lat), parseFloat(item.lon)],
               };
@@ -148,14 +146,12 @@ export default function LocationAutocomplete({
       {/* Label Bar */}
       <div className="flex items-center justify-between">
         <label
-          className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
-            pointType === "origin" ? "text-blue-400" : "text-emerald-400"
-          }`}
+          className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${pointType === "origin" ? "text-blue-400" : "text-emerald-400"
+            }`}
         >
           <span
-            className={`w-4 h-4 rounded-full text-white flex items-center justify-center text-[10px] font-extrabold ${
-              pointType === "origin" ? "bg-blue-500 shadow-blue-500/50" : "bg-emerald-500 shadow-emerald-500/50"
-            }`}
+            className={`w-4 h-4 rounded-full text-white flex items-center justify-center text-[10px] font-extrabold ${pointType === "origin" ? "bg-blue-500 shadow-blue-500/50" : "bg-emerald-500 shadow-emerald-500/50"
+              }`}
           >
             {pointType === "origin" ? "A" : "B"}
           </span>
@@ -227,8 +223,8 @@ export default function LocationAutocomplete({
                     {item.category === "station"
                       ? "🌊"
                       : item.category === "road"
-                      ? "🛣️"
-                      : "🏢"}
+                        ? "🛣️"
+                        : "🏢"}
                   </div>
 
                   <div className="min-w-0">
@@ -246,8 +242,8 @@ export default function LocationAutocomplete({
                     {item.category === "station"
                       ? "Station"
                       : item.category === "road"
-                      ? "Corridor"
-                      : "Landmark"}
+                        ? "Corridor"
+                        : "Landmark"}
                   </span>
                 </div>
               </div>
