@@ -227,6 +227,9 @@ export default function StationTable({
                     <div className="font-bold text-xs text-white">{st.stationName}</div>
                     <div className="text-[10px] text-slate-500 font-mono">
                       {st.latitude.toFixed(4)}, {st.longitude.toFixed(4)}
+                      {st.lastUpdated && !isNaN(st.lastUpdated.getTime()) && (
+                        <span> • {st.lastUpdated.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", hour12: true })}</span>
+                      )}
                     </div>
                   </div>
                   <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-full border flex-shrink-0 ${badge.class}`}>
@@ -380,10 +383,13 @@ export default function StationTable({
                   >
                     {/* Station Name */}
                     <td className="py-3 px-4">
-                      <div className="font-semibold text-slate-100">{st.stationName}</div>
-                      <div className="text-[11px] text-slate-500 font-mono">
-                        {st.latitude.toFixed(4)}, {st.longitude.toFixed(4)}
-                      </div>
+                       <div className="font-semibold text-slate-100">{st.stationName}</div>
+                       <div className="text-[11px] text-slate-500 font-mono">
+                         {st.latitude.toFixed(4)}, {st.longitude.toFixed(4)}
+                         {st.lastUpdated && !isNaN(st.lastUpdated.getTime()) && (
+                           <span> • {st.lastUpdated.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", hour12: true })}</span>
+                         )}
+                       </div>
                     </td>
 
                     {/* Status Badge */}

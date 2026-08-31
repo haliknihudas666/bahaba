@@ -10,6 +10,7 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+services/advisory-scraper/node_modules
 
 # testing
 /coverage
@@ -40,3 +41,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# geospatial & vector tiles
+*.pmtiles
+public/*.pmtiles
+
+
+# X/Twitter auth cookies (contains session tokens - NEVER commit)
+services/advisory-scraper/x-auth.json

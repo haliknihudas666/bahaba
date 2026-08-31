@@ -1,4 +1,5 @@
 import type { NoahRoadSegment } from "@/types/flood-engine";
+import { NOAH_DEPTH_TABLE, NOAH_DESIGN_STORM_MM_HR } from "@/types/flood-engine";
 
 export type FloodRiskCategory = "NORMAL" | "LOW" | "HIGH" | "CRITICAL";
 
@@ -24,12 +25,29 @@ export interface NoahRoadFloodPrediction {
   label: string;
   lineWeight: number;
   passableVehicles: string[];
+  /** Official DPWH Route Number (e.g. "N1 / AH26", "N170", "N2", "N11") */
+  nationalRoute?: string;
+  /** DPWH Highway classification */
+  roadClassification?: string;
+  /** Administrative region */
+  region?: string;
 }
 
 /**
- * Calculates estimated standing water accumulation depth (D_water in cm) using:
- * Water Depth = (Net Rain) + (NOAH Hazard Multiplier * 5) - (Elevation Factor)
- * 
+ * Calculates estimated standing water accumulation depth (D_water in cm)
+ * using a rainfall-activated NOAH hazard model:
+ *
+ *   Water Depth = (Net Rain) + (NOAH Hazard Contribution) - (Elevation Factor)
+ *
+ * The NOAH hazard contribution is scaled by a rainfall activation ratio
+ * rather than a flat multiplier, producing realistic flood depth estimates
+ * that correlate with actual weather conditions:
+ *
+ *   rainfallActivation = clamp(rainMmHr / designStormIntensity, 0, 1)
+ *   saturationBoost    = clamp((rain24h - 100) / 100, 0, 0.3)
+ *   activation         = clamp(rainfallActivation + saturationBoost, 0, 1)
+ *   noahContribution   = NOAH_DEPTH_TABLE[hazardLevel] * activation
+ *
  * @param rainMmHr Live rainfall intensity in mm/hr
  * @param rain24hAccMm Cumulative 24-hour rainfall accumulation in mm
  * @param noahHazardLevel UP Project NOAH hazard scale (0 = None, 1 = Low/5-yr, 2 = Medium/25-yr, 3 = High/100-yr)
@@ -54,55 +72,114 @@ export function calculateWaterDepth(
   const grossRainfallImpact = safeRainMmHr + safeRain24h * 0.1;
   const netRain = Math.max(0, grossRainfallImpact - safeDrainage);
 
-  // 2. NOAH Hazard Multiplier Component: (noahHazardLevel * 5)
-  // Level 0 -> +0cm, Level 1 -> +5cm, Level 2 -> +10cm, Level 3 -> +15cm
-  const hazardFactor = safeHazardLevel * 5;
+  // 2. Rainfall-Activated NOAH Hazard Contribution
+  //    Scale by how close the current/forecast rainfall is to severe storm intensity (35 mm/hr).
+  //    At 0 mm/hr → 0 contribution. At 35+ mm/hr → full NOAH depth table value.
+  const rainfallActivation = Math.min(1, Math.max(0, safeRainMmHr / 35.0));
+
+  //    24h saturation boost: sustained rain > 60mm over 24h indicates soil
+  //    saturation and accumulated flooding, even if instantaneous rate drops.
+  const saturationBoost = safeRain24h > 60
+    ? Math.min(0.3, (safeRain24h - 60) / 100 * 0.3)
+    : 0;
+
+  const totalActivation = Math.min(1, rainfallActivation + saturationBoost);
+  const maxNoahDepthCm = NOAH_DEPTH_TABLE[safeHazardLevel] ?? 0;
+  const hazardContribution = maxNoahDepthCm * totalActivation;
 
   // 3. Elevation Factor Component: Higher elevation reduces standing water depth
   const elevationFactor = Math.max(0, safeElevation * 0.5);
 
   // 4. Combined Water Depth (cm)
-  const rawDepthCm = netRain + hazardFactor - elevationFactor;
+  const rawDepthCm = netRain + hazardContribution - elevationFactor;
 
   // Constrain depth to non-negative values
   return Math.max(0, Math.round(rawDepthCm * 10) / 10);
 }
 
 /**
+ * Calculates projected standing water depth (cm) in 1-3 hours
+ * taking into account current depth, 3-hour rainfall forecast accumulation,
+ * peak projected intensity, NOAH hazard, elevation, and drainage capacity.
+ */
+export function predictProjectedFloodDepth(
+  currentDepthCm: number,
+  currentRainMmHr: number,
+  forecast3hTotalMm: number,
+  forecastPeakMmHr: number,
+  noahHazardLevel: number = 0,
+  elevationM: number = 5,
+  drainageCapacity: number = 25
+): number {
+  const safeCurrentDepth = Math.max(0, currentDepthCm);
+  const safe3hTotal = Math.max(0, forecast3hTotalMm);
+  const safePeakRate = Math.max(0, forecastPeakMmHr);
+
+  if (safe3hTotal <= 0.5 && safePeakRate <= 0.2) {
+    // Rain is completely dry/cleared -> drainage allows existing water to recede
+    // Recession rate ~ 5-15 cm depending on elevation
+    const recessionCm = elevationM >= 5 ? 15 : 8;
+    return Math.max(0, Math.round((safeCurrentDepth - recessionCm) * 10) / 10);
+  }
+
+  // Future effective rain rate (combination of peak burst + sustained accumulation)
+  const effectiveFutureRate = Math.max(safePeakRate, safe3hTotal / 3.0);
+  const future24hProxy = Math.min(300, safe3hTotal * 2.5 + currentRainMmHr * 6);
+
+  // Compute theoretical steady-state depth under upcoming weather
+  const projectedDirectDepth = calculateWaterDepth(
+    effectiveFutureRate,
+    future24hProxy,
+    noahHazardLevel,
+    elevationM,
+    drainageCapacity
+  );
+
+  // Blend current standing water with projected inflow
+  let projectedDepth = projectedDirectDepth;
+  if (safeCurrentDepth > 0 && effectiveFutureRate > 10) {
+    const accumulationBonus = Math.max(0, effectiveFutureRate - drainageCapacity * 0.5) * 0.25;
+    projectedDepth = Math.max(projectedDirectDepth, safeCurrentDepth + accumulationBonus);
+  }
+
+  return Math.max(0, Math.round(projectedDepth * 10) / 10);
+}
+
+/**
  * Classifies flood risk level into Google Maps-style color codes and vehicle drivability rules.
  * 
- * Rules:
- * - NORMAL: 0–5 cm (#00b4d8 / Blue)
- * - LOW: 6–15 cm (#f97316 / Orange - Gutter Deep)
- * - HIGH: 16–30 cm (#ef4444 / Red - Half-Tire Deep)
- * - CRITICAL: >30 cm (#7f1d1d / Dark Red - Waist Deep / Impassable)
+ * Calibrated Rules:
+ * - NORMAL: 0–4 cm (#00b4d8 / Blue - Clear / Dry)
+ * - LOW: 5–14 cm (#f97316 / Orange - Gutter Deep / Caution)
+ * - HIGH: 15–28 cm (#ef4444 / Red - Half-Tire Deep / High Risk)
+ * - CRITICAL: >28 cm (#7f1d1d / Dark Red - Waist Deep / Impassable)
  */
 export function classifyFloodRisk(depthCm: number): RiskClassification {
-  if (depthCm > 30) {
+  if (depthCm > 28) {
     return {
       category: "CRITICAL",
       color: "#7f1d1d", // Dark Red
-      label: "Waist Deep / Impassable (>30 cm)",
+      label: "Waist Deep / Impassable (>28 cm)",
       lineWeight: 6,
       passableVehicles: ["Truck / Heavy 4x4 Only"],
     };
   }
 
-  if (depthCm >= 16) {
+  if (depthCm >= 15) {
     return {
       category: "HIGH",
       color: "#ef4444", // Red
-      label: "Half-Tire Deep (16–30 cm)",
+      label: "Half-Tire Deep (15–28 cm)",
       lineWeight: 6,
       passableVehicles: ["SUV / Pickup", "Truck / Heavy 4x4"],
     };
   }
 
-  if (depthCm >= 6) {
+  if (depthCm >= 5) {
     return {
       category: "LOW",
       color: "#f97316", // Orange
-      label: "Gutter Deep (6–15 cm)",
+      label: "Gutter Deep (5–14 cm)",
       lineWeight: 5,
       passableVehicles: ["Sedan / Compact", "SUV / Pickup", "Truck / Heavy 4x4"],
     };
@@ -111,7 +188,7 @@ export function classifyFloodRisk(depthCm: number): RiskClassification {
   return {
     category: "NORMAL",
     color: "#00b4d8", // Blue
-    label: "Normal / Clear (0–5 cm)",
+    label: "Normal / Clear (0–4 cm)",
     lineWeight: 5,
     passableVehicles: ["All Vehicles (Sedan, Motorcycle, SUV, Truck)"],
   };
@@ -149,5 +226,8 @@ export function predictRoadFloodRisk(
     label: classification.label,
     lineWeight: classification.lineWeight,
     passableVehicles: classification.passableVehicles,
+    nationalRoute: road.nationalRoute,
+    roadClassification: road.roadClassification,
+    region: road.region,
   };
 }

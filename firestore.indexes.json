@@ -7,14 +7,6 @@
         { "fieldPath": "geohash", "order": "ASCENDING" },
         { "fieldPath": "lastUpdated", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "telemetry_history",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "stationId", "order": "ASCENDING" },
-        { "fieldPath": "timestamp", "order": "DESCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []

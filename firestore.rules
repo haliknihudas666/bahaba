@@ -8,8 +8,8 @@ service cloud.firestore {
       allow write: if false; // Server Admin SDK bypasses rules
     }
 
-    // Historical telemetry records (read public, write admin/service account only)
-    match /telemetry_history/{documentId} {
+    // Telemetry Sync Metadata & Consolidated Snapshot (read public, write admin/service account only)
+    match /sync_meta/{documentId} {
       allow read: if true;
       allow write: if false; // Server Admin SDK bypasses rules
     }

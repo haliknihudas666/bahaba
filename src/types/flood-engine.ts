@@ -38,6 +38,40 @@ export const VEHICLE_CLEARANCE_CM: Record<string, number> = {
 } as const;
 
 /**
+ * UP NOAH Flood Hazard depth contribution table (cm).
+ *
+ * Maps NOAH hazard levels (from PMTiles `Var` property) to maximum
+ * realistic flood depth contributions at full rainfall activation.
+ *
+ * These values represent the upper-bound standing water depth for
+ * each hazard zone during a 100-year return period design storm.
+ *
+ *   Var=1 (Low)    → knee-deep   → up to 15 cm on road surface
+ *   Var=2 (Medium) → knee–waist  → up to 40 cm on road surface
+ *   Var=3 (High)   → waist+      → up to 80 cm on road surface
+ *
+ * The actual contribution is scaled by a rainfall activation ratio:
+ *   activation = clamp(rainMmHr / NOAH_DESIGN_STORM_MM_HR, 0, 1)
+ */
+export const NOAH_DEPTH_TABLE: Record<number, number> = {
+  0: 0,   // No hazard
+  1: 15,  // Low (5-yr return period equivalent)
+  2: 40,  // Medium (25-yr return period equivalent)
+  3: 80,  // High (100-yr return period equivalent)
+} as const;
+
+/**
+ * Design storm rainfall intensity threshold (mm/hr) for Metro Manila.
+ *
+ * At or above this intensity, NOAH hazard zones contribute their full
+ * depth potential. Below this, contributions are linearly scaled.
+ *
+ * Based on PAGASA historical data for NCR — a 100-year return period
+ * storm sustains ~60 mm/hr peak 1-hour rainfall intensity.
+ */
+export const NOAH_DESIGN_STORM_MM_HR = 60;
+
+/**
  * Intermediate features computed during feature engineering.
  * These feed into both the heuristic scorer and the ONNX model.
  */
@@ -144,5 +178,14 @@ export interface NoahRoadSegment {
   elevationM: number;
   noahHazardLevel: number;
   drainageCapacity: number;
+  /** Official DPWH Route Number (e.g. "N1 / AH26", "N170", "N2", "N11") */
+  nationalRoute?: string;
+  /** DPWH Highway classification */
+  roadClassification?: "Primary National" | "Secondary National" | "Tertiary National" | "Urban Arterial";
+  /** Administrative region (e.g. "NCR (Metro Manila)", "Region III (Central Luzon)") */
+  region?: string;
+  /** Detailed description or corridor notes */
+  description?: string;
 }
+
 

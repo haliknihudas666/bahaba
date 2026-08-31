@@ -3,114 +3,167 @@
 // ---------------------------------------------------------------------------
 // Bahaba (Baha ba? / "Is It Flooded?") – Real-Time Flood Status React Hook
 //
-// React hook subscribing to the `stations` Firestore collection via `onSnapshot`.
-// Provides real-time stream of station updates, loading state, and error handling.
+// React hook fetching live telemetry with multi-layer in-memory caching
+// and periodic background polling to minimize database and server load.
 // ---------------------------------------------------------------------------
 
-import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, orderBy, Timestamp } from "firebase/firestore";
-import { clientDb } from "@/lib/firebase/client";
-import type { LiveStation } from "@/types";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getStationCoords, slugifyStationId } from "@/lib/firebase/station-coords";
+import type { LiveStation, ScrapeResult } from "@/types";
+
+export type TelemetrySource = "database" | "scraper" | "memory";
 
 export interface UseLiveFloodStatusReturn {
   /** Live list of active station telemetry snapshots */
   stations: LiveStation[];
   /** Loading state flag (true during initial connection / snapshot fetch) */
   loading: boolean;
-  /** Error object if subscription fails, null otherwise */
+  /** Error object if fetch fails, null otherwise */
   error: Error | null;
+  /** Data source indicator */
+  source: TelemetrySource;
+  /** Latest observation or sync timestamp across telemetry stations */
+  lastUpdated: Date | null;
+  /** Function to trigger a fresh direct scrape */
+  refreshScraper: () => Promise<void>;
 }
 
-/**
- * Custom React hook for streaming real-time PAGASA station telemetry from Firestore.
- *
- * @returns `{ stations, loading, error }`
- */
-export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
-  const [stations, setStations] = useState<LiveStation[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<Error | null>(null);
+/** Global in-memory cache shared across React hook instances */
+let clientCachedStations: LiveStation[] | null = null;
+let clientCachedAt = 0;
+let clientLastUpdated: Date | null = null;
+let inflightFetch: Promise<LiveStation[]> | null = null;
 
-  useEffect(() => {
-    if (!clientDb) {
+function parseTimestamp(val: unknown): Date | null {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  if (typeof (val as any).toDate === "function") {
+    try {
+      const d = (val as any).toDate();
+      if (d instanceof Date && !isNaN(d.getTime())) return d;
+    } catch {
+      // ignore
+    }
+  }
+  if (typeof val === "string" || typeof val === "number") {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
+  const [stations, setStations] = useState<LiveStation[]>(() => clientCachedStations || []);
+  const [loading, setLoading] = useState<boolean>(() => !clientCachedStations);
+  const [error, setError] = useState<Error | null>(null);
+  const [source, setSource] = useState<TelemetrySource>(() => clientCachedStations ? "memory" : "database");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(() => clientLastUpdated);
+
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchTelemetry = useCallback(async (force = false, isBackground = false) => {
+    // If not forced and we have recent client cache (< 45s), reuse it
+    const now = Date.now();
+    if (!force && clientCachedStations && now - clientCachedAt < 45_000) {
+      setStations(clientCachedStations);
+      setLastUpdated(clientLastUpdated);
       setLoading(false);
       return;
     }
 
-    try {
+    if (!isBackground && !clientCachedStations) {
       setLoading(true);
-      setError(null);
+    }
 
-      const stationsRef = collection(clientDb, "stations");
-      const q = query(stationsRef, orderBy("stationName", "asc"));
-
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot: any) => {
-          const liveList: LiveStation[] = [];
-
-          snapshot.forEach((docSnap: any) => {
-            const data = docSnap.data();
-
-            // Extract coordinates from GeoPoint or object
-            let latitude = 0;
-            let longitude = 0;
-            if (data.coordinates) {
-              latitude = typeof data.coordinates.latitude === "number"
-                ? data.coordinates.latitude
-                : data.coordinates._lat ?? 0;
-
-              longitude = typeof data.coordinates.longitude === "number"
-                ? data.coordinates.longitude
-                : data.coordinates._long ?? 0;
-            }
-
-            // Parse Firestore Timestamp into Date
-            let lastUpdatedDate: Date | null = null;
-            if (data.lastUpdated instanceof Timestamp) {
-              lastUpdatedDate = data.lastUpdated.toDate();
-            } else if (data.lastUpdated && typeof data.lastUpdated.toDate === "function") {
-              lastUpdatedDate = data.lastUpdated.toDate();
-            } else if (data.lastUpdated?.seconds) {
-              lastUpdatedDate = new Date(data.lastUpdated.seconds * 1000);
-            }
-
-            liveList.push({
-              stationId: data.stationId || docSnap.id,
-              stationName: data.stationName || "Unknown Station",
-              latitude,
-              longitude,
-              geohash: data.geohash || "",
-              rain10m: Number(data.rain10m ?? 0),
-              rain1h: Number(data.rain1h ?? 0),
-              rain24h: Number(data.rain24h ?? 0),
-              waterLevel: Number(data.waterLevel ?? 0),
-              waterLevelDelta1h: Number(data.waterLevelDelta1h ?? 0),
-              waterRiskLevel: data.waterRiskLevel || data.riskLevel || "UNKNOWN",
-              rainRiskLevel: data.rainRiskLevel || "UNKNOWN",
-              riskLevel: data.riskLevel || "UNKNOWN",
-              lastUpdated: lastUpdatedDate,
+    try {
+      // Deduplicate concurrent requests
+      if (!inflightFetch || force) {
+        inflightFetch = (async () => {
+          const url = force ? "/api/cron/ingest?force=true" : "/api/cron/ingest";
+          const res = await fetch(url);
+          if (!res.ok) {
+            throw new Error(`Telemetry fetch failed with status ${res.status}`);
+          }
+          const data: ScrapeResult = await res.json();
+          if (data.stations && data.stations.length > 0) {
+            const mapped: LiveStation[] = data.stations.map((st) => {
+              const fallbackCoords = getStationCoords(st.stationName);
+              const stationTime = parseTimestamp(st.observedAt) || parseTimestamp(data.scrapedAt) || new Date();
+              return {
+                stationId: slugifyStationId(st.stationName),
+                stationName: st.stationName,
+                latitude: st.latitude ?? fallbackCoords.lat,
+                longitude: st.longitude ?? fallbackCoords.lng,
+                geohash: "",
+                rain10m: st.rainfall?.rain10min ?? 0,
+                rain1h: st.rainfall?.rain1hr ?? 0,
+                rain24h: st.rainfall?.rain24hr ?? 0,
+                waterLevel: st.waterLevel?.currentLevel ?? 0,
+                waterLevelDelta1h: st.waterLevel?.change1hr ?? 0,
+                waterRiskLevel: st.waterRiskLevel || st.riskLevel || "UNKNOWN",
+                rainRiskLevel: st.rainRiskLevel || "UNKNOWN",
+                riskLevel: st.riskLevel || "UNKNOWN",
+                lastUpdated: stationTime,
+              };
             });
-          });
 
-          setStations(liveList);
-          setLoading(false);
-        },
-        (err: Error) => {
-          console.error("[useLiveFloodStatus] Firestore subscription error:", err);
-          setError(err);
-          setLoading(false);
-        },
-      );
+            mapped.sort((a, b) => a.stationName.localeCompare(b.stationName));
+            clientCachedStations = mapped;
+            clientCachedAt = Date.now();
 
-      return () => {
-        unsubscribe();
-      };
-    } catch (err: unknown) {
-      console.warn("[useLiveFloodStatus] Firestore Client SDK not available.");
+            const latestTime = mapped.reduce<Date | null>((max, s) => {
+              if (!s.lastUpdated) return max;
+              if (!max || s.lastUpdated.getTime() > max.getTime()) return s.lastUpdated;
+              return max;
+            }, null) || parseTimestamp(data.scrapedAt) || new Date();
+
+            clientLastUpdated = latestTime;
+            return mapped;
+          }
+          return [];
+        })().finally(() => {
+          inflightFetch = null;
+        });
+      }
+
+      const mapped = await inflightFetch;
+      if (mapped.length > 0) {
+        setStations(mapped);
+        setSource("database");
+        setLastUpdated(clientLastUpdated);
+        setError(null);
+      }
+    } catch (err: any) {
+      console.warn("[useLiveFloodStatus] Fetch error:", err.message);
+      if (!clientCachedStations) {
+        setError(err);
+      }
+    } finally {
       setLoading(false);
     }
   }, []);
 
-  return { stations, loading, error };
+  useEffect(() => {
+    fetchTelemetry();
+
+    // Auto-refresh in background every 2 minutes
+    pollIntervalRef.current = setInterval(() => {
+      fetchTelemetry(false, true);
+    }, 120_000);
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, [fetchTelemetry]);
+
+  return {
+    stations,
+    loading,
+    error,
+    source,
+    lastUpdated,
+    refreshScraper: () => fetchTelemetry(true),
+  };
 }

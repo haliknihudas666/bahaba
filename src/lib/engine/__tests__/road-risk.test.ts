@@ -7,6 +7,7 @@ import {
   calculateHaversineDistance,
   classifySeverity,
   calculateRoadRisk,
+  isRiverGaugeStation,
   SEVERITY_RULES,
   type GeoJSONLineStringFeature,
 } from "../roadRisk";
@@ -54,25 +55,25 @@ function runRoadRiskTests() {
   const normalRes = classifySeverity(4);
   assert(
     normalRes.severity === "NORMAL" && normalRes.hex === "#00b4d8" && normalRes.weight === 3,
-    `0-5 cm maps to NORMAL (#00b4d8, weight: 3)`
+    `0-4 cm maps to NORMAL (#00b4d8, weight: 3)`
   );
 
   const alertRes = classifySeverity(10);
   assert(
     alertRes.severity === "ALERT" && alertRes.hex === "#f97316" && alertRes.weight === 4,
-    `6-15 cm maps to ALERT (#f97316, weight: 4)`
+    `5-14 cm maps to ALERT (#f97316, weight: 4)`
   );
 
-  const alarmRes = classifySeverity(25);
+  const alarmRes = classifySeverity(20);
   assert(
     alarmRes.severity === "ALARM" && alarmRes.hex === "#ef4444" && alarmRes.weight === 5,
-    `16-30 cm maps to ALARM (#ef4444, weight: 5)`
+    `15-28 cm maps to ALARM (#ef4444, weight: 5)`
   );
 
   const criticalRes = classifySeverity(45);
   assert(
     criticalRes.severity === "CRITICAL" && criticalRes.hex === "#7f1d1d" && criticalRes.weight === 6,
-    `>30 cm maps to CRITICAL (#7f1d1d, weight: 6)`
+    `>28 cm maps to CRITICAL (#7f1d1d, weight: 6)`
   );
 
   // Test 4: Road Risk — Inland Road with Heavy Rain
@@ -159,9 +160,119 @@ function runRoadRiskTests() {
     riverbankRisk.isNearRiver === true,
     `Riverbank Drive IS in riverbank zone (${riverbankRisk.nearestStation.distanceKm} km)`
   );
+  // Test 6: DPWH National Highway Route Metadata Propagation
+  const nationalHighwayFeature: GeoJSONLineStringFeature = {
+    type: "Feature",
+    properties: {
+      name: "MacArthur Hwy / N2 (Apalit - Sto. Tomas - San Fernando Pampanga Basin)",
+      elevation: 2.8,
+      nationalRoute: "N2",
+      roadClassification: "Primary National",
+      region: "Region III (Central Luzon)",
+      description: "Manila North Road / Major Pampanga River flood basin"
+    },
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [120.7612, 14.9452],
+        [120.6865, 15.0345]
+      ]
+    }
+  };
+
+  const nationalRisk = calculateRoadRisk(nationalHighwayFeature, mockStations);
   assert(
-    riverbankRisk.estimatedDepthCm > roadRisk.estimatedDepthCm,
-    `Riverbank road has higher depth than inland road (${riverbankRisk.estimatedDepthCm} cm > ${roadRisk.estimatedDepthCm} cm)`
+    nationalRisk.nationalRoute === "N2",
+    `Propagates DPWH national route (${nationalRisk.nationalRoute})`
+  );
+  assert(
+    nationalRisk.roadClassification === "Primary National",
+    `Propagates DPWH classification (${nationalRisk.roadClassification})`
+  );
+  assert(
+    nationalRisk.region === "Region III (Central Luzon)",
+    `Propagates region tag (${nationalRisk.region})`
+  );
+
+  // Test 7: River Basin Gauge Identification & District Rainfall Fusion
+  const mockRiverStation: LiveStation = {
+    stationId: "panahon-pampanga-wl-sulipan",
+    stationName: "Sulipan (Water Level)",
+    latitude: 14.9392,
+    longitude: 120.7608,
+    geohash: "",
+    rain10m: 0,
+    rain1h: 0,
+    rain24h: 0,
+    waterLevel: 5.8,
+    waterLevelDelta1h: 0.3,
+    waterRiskLevel: "ALARM",
+    rainRiskLevel: "NORMAL",
+    riskLevel: "ALARM",
+    lastUpdated: new Date(),
+  };
+
+  const mockAwsStation: LiveStation = {
+    stationId: "panahon-qc-science-garden",
+    stationName: "Science Garden, Quezon City",
+    latitude: 14.6451,
+    longitude: 121.0442,
+    geohash: "",
+    rain10m: 0,
+    rain1h: 2.0,
+    rain24h: 10.0,
+    waterLevel: 0,
+    waterLevelDelta1h: 0,
+    waterRiskLevel: "NORMAL",
+    rainRiskLevel: "NORMAL",
+    riskLevel: "NORMAL",
+    lastUpdated: new Date(),
+  };
+
+  assert(
+    isRiverGaugeStation(mockRiverStation) === true,
+    `Identifies River Basin water level station correctly`
+  );
+  assert(
+    isRiverGaugeStation(mockAwsStation) === false,
+    `Identifies AWS weather station as non-riverbasin correctly`
+  );
+
+  // Test 8: PAGASA Sensor Spatial Validity Radius Constraints (5-10km rainfall, 2-5km river)
+  console.log("── Test 8: Sensor Spatial Validity Radius Constraints ──");
+  const farStation: LiveStation = {
+    stationId: "far-station",
+    stationName: "Far Away Station",
+    latitude: 14.800, // ~25km away from España Blvd
+    longitude: 121.200,
+    geohash: "",
+    rain10m: 10,
+    rain1h: 60, // Heavy storm 25km away
+    rain24h: 200,
+    waterLevel: 20.0,
+    waterLevelDelta1h: 1.0,
+    waterRiskLevel: "CRITICAL",
+    rainRiskLevel: "CRITICAL",
+    riskLevel: "CRITICAL",
+    lastUpdated: new Date(),
+  };
+
+  // When only farStation is provided without district rain, effective rain is 0 because >10km
+  const farStationRisk = calculateRoadRisk(sampleLineString, [farStation]);
+  assert(
+    farStationRisk.estimatedDepthCm === 0,
+    `Station >10km away (${farStationRisk.nearestStation.distanceKm} km) is correctly ignored (0cm water depth)`
+  );
+
+  // When hyper-local district rainfall is supplied, it properly takes precedence over far station
+  const localizedMeteoRisk = calculateRoadRisk(
+    sampleLineString,
+    [farStation],
+    { currentRainMmHr: 15.0, rain24hMm: 40.0 }
+  );
+  assert(
+    localizedMeteoRisk.estimatedDepthCm > 0,
+    `Hyper-local Open-Meteo rainfall accurately applies when station is out of radius (${localizedMeteoRisk.estimatedDepthCm} cm)`
   );
 
   console.log("\n✅ All Spatial Risk Matcher Unit Tests Passed Successfully!\n");

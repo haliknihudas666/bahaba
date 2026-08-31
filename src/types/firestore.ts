@@ -88,3 +88,20 @@ export interface NearestStationResult {
   station: LiveStation;
   distanceKm: number;
 }
+
+/**
+ * Telemetry synchronization metadata and consolidated snapshot document in `sync_meta/telemetry`.
+ */
+export interface TelemetrySyncMetaDoc {
+  /** Server timestamp when sync was executed */
+  lastSyncedAt: unknown;
+  /** Number of stations persisted */
+  stationCount: number;
+  /** Status of last ingestion pipeline */
+  status: "SUCCESS" | "FAILED";
+  /** ISO string of last update */
+  updatedAtIso?: string;
+  /** Consolidated active stations array for O(1) single-document reads */
+  stations?: StationDoc[];
+}
+

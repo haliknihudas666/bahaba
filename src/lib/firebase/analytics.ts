@@ -102,6 +102,10 @@ export function trackRouteCalculation(params: {
   durationMin: number;
   maxFloodDepthCm: number;
   overallStatus: string;
+  mode?: string;
+  vehicleType?: string;
+  trafficLevel?: string;
+  walkabilityCategory?: string;
 }) {
   logAnalyticsEvent("calculate_flood_route", {
     origin: params.origin,
@@ -110,6 +114,10 @@ export function trackRouteCalculation(params: {
     duration_min: params.durationMin,
     max_flood_depth_cm: params.maxFloodDepthCm,
     overall_status: params.overallStatus,
+    travel_mode: params.mode ?? "driving",
+    vehicle_type: params.vehicleType ?? "all",
+    traffic_level: params.trafficLevel ?? "SMOOTH",
+    walkability_category: params.walkabilityCategory ?? "WALKABLE_CLEAR",
   });
 }
 
@@ -119,7 +127,7 @@ export function trackStationSelected(params: {
   stationName: string;
   waterLevel?: number;
   riskLevel?: string;
-  source?: "map" | "table" | "finder";
+  source?: "map" | "table" | "finder" | "telemetry-panel";
 }) {
   logAnalyticsEvent("select_station", {
     station_id: params.stationId,
@@ -166,8 +174,34 @@ export function trackTelemetrySync() {
 }
 
 /** Track Table view tab switch */
-export function trackTableTabSwitch(tabName: "station-telemetry" | "road-predictions") {
+export function trackTableTabSwitch(
+  tabName: "station-telemetry" | "road-predictions" | "nearest-finder" | string
+) {
   logAnalyticsEvent("switch_table_tab", {
     tab_name: tabName,
   });
 }
+
+/** Track Donation modal and account copy actions */
+export function trackDonationAction(params: {
+  action: "open_modal" | "copy_bpi" | "copy_bdo" | "copy_email" | "view_image";
+}) {
+  logAnalyticsEvent("donation_interaction", {
+    donation_action: params.action,
+  });
+}
+
+/** Track About / Info modal interactions */
+export function trackAboutAction(params: {
+  action: "open_modal" | "tab_switch" | "external_link_click";
+  tabName?: string;
+  linkName?: string;
+}) {
+  logAnalyticsEvent("about_interaction", {
+    about_action: params.action,
+    tab_name: params.tabName ?? "overview",
+    link_name: params.linkName,
+  });
+}
+
+
