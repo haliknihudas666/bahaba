@@ -12,6 +12,8 @@
 //   4. Cyclone Tracks: Tropical cyclone tracks, coordinates, category, and forecast radius.
 // ---------------------------------------------------------------------------
 
+import crypto from "crypto";
+import https from "https";
 import type {
   FloodRiskLevel,
   LiveStation,
@@ -36,6 +38,69 @@ const BROWSER_USER_AGENT =
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Universal HTTP/HTTPS fetcher with fallback to native node:https module.
+ * Guarantees reliable connections across Node.js, Next.js, and Bun on Windows.
+ */
+export async function robustFetch(
+  url: string,
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    timeoutMs?: number;
+  } = {}
+): Promise<{ ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<any>; headers: { get: (k: string) => string | null } }> {
+  const timeout = options.timeoutMs || REQUEST_TIMEOUT_MS;
+
+  try {
+    const res = await fetch(url, {
+      method: options.method || "GET",
+      headers: options.headers,
+      signal: AbortSignal.timeout(timeout),
+    });
+    return res;
+  } catch {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const req = https.request(
+        parsedUrl,
+        {
+          method: options.method || "GET",
+          headers: options.headers,
+          timeout,
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => {
+            const status = res.statusCode || 0;
+            const ok = status >= 200 && status < 300;
+            resolve({
+              ok,
+              status,
+              text: async () => data,
+              json: async () => JSON.parse(data),
+              headers: {
+                get: (k: string) => {
+                  const val = res.headers[k.toLowerCase()];
+                  return Array.isArray(val) ? val.join(", ") : val || null;
+                },
+              },
+            });
+          });
+        }
+      );
+
+      req.on("error", reject);
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error(`Timeout connecting to ${url}`));
+      });
+      req.end();
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // TypeScript Interfaces
@@ -107,6 +172,13 @@ export interface PanahonEnrichedStation extends StationTelemetry {
   windDirectionDeg?: number | null;
   weatherDescription?: string | null;
   weatherIconUrl?: string | null;
+}
+
+export interface PanahonSessionData {
+  token: string;
+  apiSig: string;
+  cookies: string;
+  fetchedAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,25 +253,37 @@ export function parseObservedAtToIso(observedAt: string | undefined | null): str
 // Session & Token Management
 // ---------------------------------------------------------------------------
 
+let cachedPanahonSession: PanahonSessionData | null = null;
+const SESSION_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 /**
- * Fetches CSRF token and session cookies dynamically from the Panahon landing page.
+ * Fetches CSRF token, api-sig signing secret, and session cookies dynamically from the Panahon landing page.
  */
-export async function getPanahonSession(): Promise<{ token: string; cookies: string } | null> {
+export async function getPanahonSession(forceRefresh = false): Promise<PanahonSessionData | null> {
+  const now = Date.now();
+  if (!forceRefresh && cachedPanahonSession && now - cachedPanahonSession.fetchedAt < SESSION_CACHE_TTL_MS) {
+    return cachedPanahonSession;
+  }
+
   try {
-    const res = await fetch(PANAHON_BASE, {
+    const res = await robustFetch(PANAHON_BASE, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      signal: AbortSignal.timeout(10_000),
+      timeoutMs: 10_000,
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) return cachedPanahonSession;
 
     const html = await res.text();
     const tokenMatch = html.match(/meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/i);
     const token = tokenMatch ? tokenMatch[1] : null;
-    if (!token) return null;
+
+    const sigMatch = html.match(/meta\s+name=["']api-sig["']\s+content=["']([^"']+)["']/i);
+    const apiSig = sigMatch ? sigMatch[1] : "";
+
+    if (!token) return cachedPanahonSession;
 
     const setCookie = res.headers.get("set-cookie");
     const cookies = setCookie
@@ -209,23 +293,67 @@ export async function getPanahonSession(): Promise<{ token: string; cookies: str
           .join("; ")
       : "";
 
-    return { token, cookies };
+    cachedPanahonSession = {
+      token,
+      apiSig: apiSig || "",
+      cookies,
+      fetchedAt: now,
+    };
+
+    return cachedPanahonSession;
   } catch (err) {
     console.warn("[Panahon] Session handshake warning:", err instanceof Error ? err.message : err);
-    return null;
+    return cachedPanahonSession;
   }
 }
 
 /**
- * Resolve effective token (env variable, param override, default token, or dynamic handshake).
+ * Computes required HMAC-SHA256 headers for Panahon API requests (X-Ts, X-Nonce, X-Sig).
  */
-async function resolveToken(tokenOverride?: string): Promise<{ token: string; cookies?: string }> {
-  if (tokenOverride) return { token: tokenOverride };
-  if (DEFAULT_PANAHON_TOKEN) return { token: DEFAULT_PANAHON_TOKEN };
+export function computePanahonHeaders(
+  method: string,
+  urlPathOrUrl: string,
+  apiSig?: string
+): Record<string, string> {
+  if (!apiSig) return {};
+
+  try {
+    const parsed = new URL(urlPathOrUrl, PANAHON_BASE);
+    const cleanPath = parsed.pathname.replace(/^\/+|\/+$/g, "");
+    const ts = String(Math.floor(Date.now() / 1000));
+    const nonce = crypto.randomBytes(16).toString("hex");
+    const stringToSign = [method.toUpperCase(), cleanPath, ts, nonce].join("\n");
+    const sig = crypto.createHmac("sha256", apiSig).update(stringToSign).digest("hex");
+
+    return {
+      "X-Ts": ts,
+      "X-Nonce": nonce,
+      "X-Sig": sig,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Resolve effective token, apiSig, and cookies (override, env var, or dynamic handshake).
+ */
+async function resolveSession(tokenOverride?: string): Promise<{ token: string; apiSig?: string; cookies?: string }> {
+  if (tokenOverride) {
+    return { token: tokenOverride };
+  }
 
   const session = await getPanahonSession();
   if (session?.token) {
-    return { token: session.token, cookies: session.cookies };
+    return {
+      token: session.token,
+      apiSig: session.apiSig,
+      cookies: session.cookies,
+    };
+  }
+
+  if (process.env.PANAHON_API_TOKEN) {
+    return { token: process.env.PANAHON_API_TOKEN };
   }
 
   return { token: DEFAULT_PANAHON_TOKEN };
@@ -243,18 +371,20 @@ export async function fetchPanahonAws(
   tokenOverride?: string
 ): Promise<PanahonRawItem[]> {
   try {
-    const { token, cookies } = await resolveToken(tokenOverride);
+    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
     const url = `${PANAHON_BASE}/api/v1/aws?token=${encodeURIComponent(token)}&parameter=${encodeURIComponent(parameter)}`;
+    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
 
-    const res = await fetch(url, {
+    const res = await robustFetch(url, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
         Referer: PANAHON_BASE,
         Accept: "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
         ...(cookies ? { Cookie: cookies } : {}),
+        ...signedHeaders,
       },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      timeoutMs: REQUEST_TIMEOUT_MS,
     });
 
     if (!res.ok) return [];
@@ -277,19 +407,21 @@ export async function fetchPanahonRiverbasin(
   tokenOverride?: string
 ): Promise<PanahonRawItem[]> {
   try {
-    const { token, cookies } = await resolveToken(tokenOverride);
+    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
     const endpoint = parameter === "raingauge" ? "raingauge" : "waterlevel";
     const url = `${PANAHON_BASE}/api/v1/riverbasin/${endpoint}?token=${encodeURIComponent(token)}&parameter=${encodeURIComponent(parameter)}`;
+    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
 
-    const res = await fetch(url, {
+    const res = await robustFetch(url, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
         Referer: PANAHON_BASE,
         Accept: "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
         ...(cookies ? { Cookie: cookies } : {}),
+        ...signedHeaders,
       },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      timeoutMs: REQUEST_TIMEOUT_MS,
     });
 
     if (!res.ok) return [];
@@ -312,18 +444,20 @@ export async function fetchPanahonSynop(
   tokenOverride?: string
 ): Promise<PanahonRawItem[]> {
   try {
-    const { token, cookies } = await resolveToken(tokenOverride);
+    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
     const url = `${PANAHON_BASE}/api/v1/synop?token=${encodeURIComponent(token)}&parameter=${encodeURIComponent(parameter)}`;
+    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
 
-    const res = await fetch(url, {
+    const res = await robustFetch(url, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
         Referer: PANAHON_BASE,
         Accept: "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
         ...(cookies ? { Cookie: cookies } : {}),
+        ...signedHeaders,
       },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      timeoutMs: REQUEST_TIMEOUT_MS,
     });
 
     if (!res.ok) return [];
@@ -345,18 +479,20 @@ export async function fetchPanahonCycloneTrack(
   tokenOverride?: string
 ): Promise<PanahonCycloneTrackItem[]> {
   try {
-    const { token, cookies } = await resolveToken(tokenOverride);
+    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
     const url = `${PANAHON_BASE}/api/v1/cyclone-track?token=${encodeURIComponent(token)}`;
+    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
 
-    const res = await fetch(url, {
+    const res = await robustFetch(url, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
         Referer: PANAHON_BASE,
         Accept: "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
         ...(cookies ? { Cookie: cookies } : {}),
+        ...signedHeaders,
       },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      timeoutMs: REQUEST_TIMEOUT_MS,
     });
 
     if (!res.ok) return [];
@@ -467,6 +603,9 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
       awsTempRes,
       awsHeatRes,
       awsHumRes,
+      awsPressRes,
+      awsWindSpeedRes,
+      awsWindDirRes,
       synopRainRes,
     ] = await Promise.allSettled([
       fetchPanahonRiverbasin("waterlevel"),
@@ -475,6 +614,9 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
       fetchPanahonAws("temperature"),
       fetchPanahonAws("heat-index"),
       fetchPanahonAws("humidity"),
+      fetchPanahonAws("pressure"),
+      fetchPanahonAws("wind-speed"),
+      fetchPanahonAws("wind-direction"),
       fetchPanahonSynop("rain"),
     ]);
 
@@ -484,6 +626,9 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
     const awsTempItems = awsTempRes.status === "fulfilled" ? awsTempRes.value : [];
     const awsHeatItems = awsHeatRes.status === "fulfilled" ? awsHeatRes.value : [];
     const awsHumItems = awsHumRes.status === "fulfilled" ? awsHumRes.value : [];
+    const awsPressItems = awsPressRes.status === "fulfilled" ? awsPressRes.value : [];
+    const awsWindSpeedItems = awsWindSpeedRes.status === "fulfilled" ? awsWindSpeedRes.value : [];
+    const awsWindDirItems = awsWindDirRes.status === "fulfilled" ? awsWindDirRes.value : [];
     const synopRainItems = synopRainRes.status === "fulfilled" ? synopRainRes.value : [];
 
     // Helper lookup key builder
@@ -518,6 +663,33 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
       }
     }
 
+    const pressMap = new Map<string, number>();
+    for (const item of awsPressItems) {
+      const lat = cleanNumber(item.lat);
+      const lon = cleanNumber(item.lon);
+      if (lat && lon && item.site_name) {
+        pressMap.set(makeKey(lat, lon, item.site_name), cleanNumber(item.value));
+      }
+    }
+
+    const windSpeedMap = new Map<string, number>();
+    for (const item of awsWindSpeedItems) {
+      const lat = cleanNumber(item.lat);
+      const lon = cleanNumber(item.lon);
+      if (lat && lon && item.site_name) {
+        windSpeedMap.set(makeKey(lat, lon, item.site_name), cleanNumber(item.value));
+      }
+    }
+
+    const windDirMap = new Map<string, number>();
+    for (const item of awsWindDirItems) {
+      const lat = cleanNumber(item.lat);
+      const lon = cleanNumber(item.lon);
+      if (lat && lon && item.site_name) {
+        windDirMap.set(makeKey(lat, lon, item.site_name), cleanNumber(item.value));
+      }
+    }
+
     const synopRainMap = new Map<string, number>();
     for (const item of synopRainItems) {
       const lat = cleanNumber(item.lat);
@@ -532,18 +704,36 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
     const rawRainfallReadings: RainfallReading[] = [];
     const rawWaterLevelReadings: WaterLevelReading[] = [];
 
-    // 1. Process AWS Rainfall Stations
-    for (const item of awsRainItems) {
+    // Master pool of all AWS items from any successful parameter stream
+    const allAwsItems = [
+      ...awsRainItems,
+      ...awsTempItems,
+      ...awsHeatItems,
+      ...awsHumItems,
+      ...awsPressItems,
+      ...awsWindSpeedItems,
+      ...awsWindDirItems,
+    ];
+
+    // 1. Process AWS Stations
+    for (const item of allAwsItems) {
       const lat = cleanNumber(item.lat);
       const lon = cleanNumber(item.lon);
       if (!lat || !lon) continue;
 
       const stationName = cleanStationName(item.site_name) || `Panahon AWS ${item.site_id}`;
       const key = makeKey(lat, lon, stationName);
-      const rain1h = cleanNumber(item.value);
-      const rain24h = cleanNumber(item["24_hr_value"]);
+      if (stationMap.has(key)) continue;
+
+      // Find matching rainfall item if available
+      const rainItem = awsRainItems.find(
+        (r) => makeKey(cleanNumber(r.lat), cleanNumber(r.lon), cleanStationName(r.site_name)) === key
+      );
+
+      const rain1h = rainItem ? cleanNumber(rainItem.value) : 0;
+      const rain24h = rainItem ? cleanNumber(rainItem["24_hr_value"]) : 0;
       const rain3h = synopRainMap.get(key) ?? 0;
-      const observedAtIso = parseObservedAtToIso(item.observed_at);
+      const observedAtIso = parseObservedAtToIso(item.observed_at || rainItem?.observed_at);
 
       const rainfall: RainfallReading = {
         stationName,
@@ -556,7 +746,9 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
         rain24hr: rain24h,
       };
 
-      rawRainfallReadings.push(rainfall);
+      if (rainItem) {
+        rawRainfallReadings.push(rainfall);
+      }
 
       const rainRiskLevel = classifyRainRisk(rainfall);
       const waterRiskLevel: FloodRiskLevel["label"] = "NORMAL";
@@ -576,6 +768,9 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
         temperatureC: tempMap.get(key) ?? null,
         heatIndexC: heatMap.get(key) ?? null,
         humidityPercent: humMap.get(key) ?? null,
+        pressureHpa: pressMap.get(key) ?? null,
+        windSpeedMs: windSpeedMap.get(key) ?? null,
+        windDirectionDeg: windDirMap.get(key) ?? null,
       });
     }
 
