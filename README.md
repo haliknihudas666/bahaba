@@ -213,7 +213,7 @@ $$
 Where:
 - $\text{Drainage}_{\text{base}} = 10\text{ mm/hr}$ (adjusted up to $32\text{ mm/hr}$ for elevated corridors)
 - $\text{Multiplier}_{\text{pond}} = 1.5$ if road elevation $\le 3.0\text{ m ASL}$, else $1.0$
-- $\text{Bonus}_{\text{burst}} = (\text{Rain}_{10\text{m}} - 5) \times 0.2\text{ cm}$ if $\text{Rain}_{10\text{m}} > 5\text{ mm}$
+- $\text{Bonus}_{\text{burst}} = (\text{Rain}_{10\text{min}} - 5) \times 0.2\text{ cm} \quad (\text{if } \text{Rain}_{10\text{min}} > 5\text{ mm})$
 
 ### 3. Fluvial Riverbank Surge
 Added only when the road is within $500\text{ m}$ of a river station at ALARM or CRITICAL level:
