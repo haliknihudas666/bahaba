@@ -3,13 +3,24 @@
 // Scrapes @MMDA, @NDRRMC_OpCen, & @dost_pagasa via Playwright & saves to MongoDB
 // ---------------------------------------------------------------------------
 
+import dns from "node:dns";
 import { chromium, type Browser } from "playwright";
 import { MongoClient, type Db } from "mongodb";
 import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
 import * as cheerio from "cheerio";
-import { parseAdvisoryPost, isWeatherOrFloodRelated, type RawTweetInput } from "../../src/lib/advisories/parser";
+import { parseAdvisoryPostAsync, isWeatherOrFloodRelated, isInternationalOrForeignEvent, type RawTweetInput } from "../../src/lib/advisories/parser";
+
+// Fix for Windows / Node / Bun c-ares DNS resolving to localhost 127.0.0.1 for SRV records
+try {
+  const currentServers = dns.getServers();
+  if (!currentServers.length || currentServers.every((s) => s === "127.0.0.1" || s === "::1")) {
+    dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+  }
+} catch {
+  // Ignore in environments where setServers is restricted
+}
 
 // Load environment variables from parent .env.local or local .env
 dotenv.config({ path: path.resolve(__dirname, "../../.env.local") });
@@ -47,8 +58,8 @@ async function getDatabase(): Promise<Db> {
 const GOV_HANDLES = ["MMDA", "NDRRMC_OpCen", "dost_pagasa"];
 
 // News outlets — scrape via X search with targeted keywords
-const NEWS_SEARCH_KEYWORDS = "baha OR flood OR flooding OR floodwater OR bagyo OR typhoon OR walangpasok";
-const NEWS_OUTLETS = ["gmanews", "ABSCBNNews", "News5PH", "inquirerdotnet"];
+const NEWS_SEARCH_KEYWORDS = "baha OR flood OR flooding OR floodwater OR \"knee deep\" OR \"gutter deep\" OR \"waist deep\" OR \"walang pasok\" OR walangpasok";
+const NEWS_OUTLETS = ["gmanews", "ABSCBNNews", "News5PH", "inquirerdotnet", "rapplerdotcom", "manilabulletin"];
 
 function buildNewsSearchUrl(handle: string): string {
   const query = `(${NEWS_SEARCH_KEYWORDS}) (from:${handle})`;
@@ -70,7 +81,7 @@ const knownPostHashes = new Map<string, string>();
 let isCacheSeeded = false;
 
 function hashAdvisory(advisory: any): string {
-  return `${advisory.id}:${advisory.status}:${advisory.isFloodReport}:${advisory.severity}:${advisory.text?.length}`;
+  return `${advisory.id}:${advisory.status}:${advisory.isFloodReport}:${advisory.severity}:${advisory.locationPins?.length || 0}:${advisory.coordinates?.lat || 0}:${advisory.rawText?.length || 0}`;
 }
 
 async function seedAdvisoriesCache(db: Db) {
@@ -79,7 +90,7 @@ async function seedAdvisoriesCache(db: Db) {
     const existing = await db
       .collection("advisories")
       .find({ publishedAt: { $gte: cutoffIso } })
-      .project({ id: 1, status: 1, isFloodReport: 1, severity: 1, text: 1 })
+      .project({ id: 1, status: 1, isFloodReport: 1, severity: 1, locationPins: 1, coordinates: 1, rawText: 1 })
       .toArray();
 
     knownPostHashes.clear();
@@ -182,14 +193,29 @@ async function scrapeProfileWithBrowser(
           return; // Skip tweets older than cutoff
         }
 
-        // 2. Extract text content
-        let text = art.find("[lang]").text().trim();
-        if (!text) {
-          text = art.find("p").text().trim();
+        // 2. Extract text content with preserved line breaks
+        let text = "";
+        const langEl = art.find("[lang]").first();
+        if (langEl.length > 0) {
+          const clone = langEl.clone();
+          clone.find("br").replaceWith("\n");
+          clone.find("div, p").before("\n");
+          text = clone.text().trim();
         }
         if (!text) {
-          text = art.text().trim();
-          // Strip author prefix if present (e.g. "Official MMDA@MMDA37m")
+          const pEl = art.find("p").first();
+          if (pEl.length > 0) {
+            const clone = pEl.clone();
+            clone.find("br").replaceWith("\n");
+            clone.find("div").before("\n");
+            text = clone.text().trim();
+          }
+        }
+        if (!text) {
+          const clone = art.clone();
+          clone.find("br").replaceWith("\n");
+          clone.find("div, p").before("\n");
+          text = clone.text().trim();
           text = text.replace(/^.*?@\w+\s*(?:\d+[smhdwy]|\w+\s*\d+)?\s*/i, "");
         }
 
@@ -224,13 +250,13 @@ async function scrapeProfileWithBrowser(
         console.log(`[Scraper] Reached cutoff date (${cutoffDate!.toISOString().split("T")[0]}) for @${handle} after ${scrollPass} scroll passes.`);
         break;
       }
-
+      
       // Check if this parse pass found any new posts
       const newThisPass = posts.length - prevPostCount;
       if (newThisPass === 0) {
         consecutiveStalls++;
-        // Require 2 consecutive stalls before giving up (X can lag loading)
-        if (consecutiveStalls >= 2) {
+        // Require 3 consecutive stalls before giving up (X can lag loading)
+        if (consecutiveStalls >= 3) {
           console.log(`[Scraper] No new content after ${consecutiveStalls} consecutive scroll passes, stopping @${handle}.`);
           break;
         }
@@ -271,32 +297,37 @@ async function scrapeProfileWithBrowser(
 }
 
 /**
- * Scrapes an X search results page
+ * Scrapes tweets from an X Search URL (e.g. news keyword searches)
  */
-async function scrapeSearchWithBrowser(browser: Browser, searchUrl: string, label: string, cutoffDate?: Date): Promise<RawTweetInput[]> {
+async function scrapeNewsSearchTimeline(
+  browser: Browser,
+  handle: string,
+  searchUrl: string,
+  cutoffDate?: Date,
+  label: string = "Search"
+): Promise<RawTweetInput[]> {
   const hasAuth = fs.existsSync(AUTH_FILE);
-  if (!hasAuth) {
-    console.warn("[Scraper] ⚠ No auth file — search requires login. Skipping hashtag search.");
-    return [];
-  }
-
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     viewport: { width: 1280, height: 900 },
-    storageState: AUTH_FILE,
+    ...(hasAuth ? { storageState: AUTH_FILE } : {}),
   });
 
   const page = await context.newPage();
   const posts: RawTweetInput[] = [];
 
   try {
-    console.log(`[Scraper] Searching X for ${label}...`);
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await page.waitForSelector("article", { timeout: 10_000 }).catch(() => null);
+    console.log(`[Scraper] Searching X for @${handle}...`);
+    await page.goto(searchUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+
+    await page.waitForSelector("article, [data-tweet-id]", { timeout: 10_000 }).catch(() => null);
     await page.waitForTimeout(3000);
 
-    const MAX_SCROLL_PASSES = cutoffDate ? 30 : 3;
+    const MAX_SCROLL_PASSES = cutoffDate ? 40 : 8;
     const seenIds = new Set<string>();
     let reachedCutoff = false;
     let scrollPass = 0;
@@ -311,16 +342,13 @@ async function scrapeSearchWithBrowser(browser: Browser, searchUrl: string, labe
 
       $("article").each((_, el) => {
         const art = $(el);
+        const dataId = art.attr("data-tweet-id") || "";
         const href = art.find("a[href*='/status/']").attr("href") || "";
         const idMatch = href.match(/\/status\/([0-9]+)/);
-        const id = idMatch ? idMatch[1] : Math.random().toString(36).slice(2);
+        const id = dataId || (idMatch ? idMatch[1] : Math.random().toString(36).slice(2));
 
         if (seenIds.has(id)) return;
         seenIds.add(id);
-
-        // Extract author from the tweet link (e.g. /username/status/123)
-        const authorMatch = href.match(/^\/([^\/]+)\/status/);
-        const author = authorMatch ? authorMatch[1] : "search";
 
         const timeAttr = art.find("time").attr("datetime");
         let publishedAt = timeAttr || "";
@@ -334,15 +362,41 @@ async function scrapeSearchWithBrowser(browser: Browser, searchUrl: string, labe
             }
           } catch { }
         }
-        if (!publishedAt) publishedAt = new Date().toISOString();
+        if (!publishedAt) {
+          publishedAt = new Date().toISOString();
+        }
 
         if (cutoffDate && new Date(publishedAt) < cutoffDate) {
           reachedCutoff = true;
           return;
         }
 
-        let text = art.find("[lang]").text().trim();
-        if (!text) text = art.find("p").text().trim();
+        const authorMatch = href.match(/(?:x\.com|twitter\.com)?\/([A-Za-z0-9_]+)\/status/i);
+        const author = (authorMatch && !/^(i|status|home|search|news)$/i.test(authorMatch[1])) ? authorMatch[1] : handle;
+
+        let text = "";
+        const langEl = art.find("[lang]").first();
+        if (langEl.length > 0) {
+          const clone = langEl.clone();
+          clone.find("br").replaceWith("\n");
+          clone.find("div, p").before("\n");
+          text = clone.text().trim();
+        }
+        if (!text) {
+          const pEl = art.find("p").first();
+          if (pEl.length > 0) {
+            const clone = pEl.clone();
+            clone.find("br").replaceWith("\n");
+            clone.find("div").before("\n");
+            text = clone.text().trim();
+          }
+        }
+        if (!text) {
+          const clone = art.clone();
+          clone.find("br").replaceWith("\n");
+          clone.find("div, p").before("\n");
+          text = clone.text().trim();
+        }
         if (!text || text.trim().length < 5) return;
 
         const photoUrls = art
@@ -369,14 +423,14 @@ async function scrapeSearchWithBrowser(browser: Browser, searchUrl: string, labe
       });
 
       if (reachedCutoff) {
-        console.log(`[Scraper] Reached cutoff date for #WalangPasok search after ${scrollPass} scroll passes.`);
+        console.log(`[Scraper] Reached cutoff date for search after ${scrollPass} scroll passes.`);
         break;
       }
 
       const newThisPass = posts.length - prevPostCount;
       if (newThisPass === 0) {
         consecutiveStalls++;
-        if (consecutiveStalls >= 2) {
+        if (consecutiveStalls >= 3) {
           console.log(`[Scraper] No new search results after ${consecutiveStalls} stalls, stopping.`);
           break;
         }
@@ -402,7 +456,91 @@ async function scrapeSearchWithBrowser(browser: Browser, searchUrl: string, labe
 }
 
 /**
- * Main Scraper Job: Scrapes all profiles, parses NLP/hotspots, and writes to Firestore
+ * Reparses and force-updates all existing advisories in MongoDB with the latest NLP & geocoder
+ */
+export async function reparseDatabaseAdvisories() {
+  const start = Date.now();
+  console.log(`\n========================================================`);
+  console.log(`[${new Date().toISOString()}] Reparsing & Force-Updating All MongoDB Advisories`);
+  console.log(`========================================================`);
+
+  const db = await getDatabase();
+  const cutoffIso = getRetentionCutoff().toISOString();
+
+  const docs = await db
+    .collection("advisories")
+    .find({ publishedAt: { $gte: cutoffIso } })
+    .toArray();
+
+  console.log(`[Reparse] Found ${docs.length} active 24h advisories in MongoDB to reprocess.`);
+
+  let updatedCount = 0;
+  let deletedForeignCount = 0;
+  const ops: any[] = [];
+
+  for (const doc of docs) {
+    const rawText = doc.rawText || "";
+    if (isInternationalOrForeignEvent(rawText)) {
+      await db.collection("advisories").deleteOne({ id: doc.id });
+      deletedForeignCount++;
+      continue;
+    }
+
+    const reparsed = await parseAdvisoryPostAsync({
+      id: doc.id,
+      text: rawText,
+      author: doc.authorHandle || doc.source,
+      createdAt: doc.publishedAt,
+      url: doc.postUrl,
+      photoUrls: doc.photoUrls || [],
+    });
+
+    const sanitized = JSON.parse(JSON.stringify(reparsed));
+    ops.push({
+      updateOne: {
+        filter: { id: doc.id },
+        update: { $set: sanitized },
+        upsert: true,
+      },
+    });
+    updatedCount++;
+  }
+
+  if (ops.length > 0) {
+    await db.collection("advisories").bulkWrite(ops, { ordered: false });
+  }
+
+  const activeFloodCount = await db.collection("advisories").countDocuments({
+    publishedAt: { $gte: cutoffIso },
+    isFloodReport: true,
+    status: "ACTIVE",
+  });
+
+  const currentTotalInDb = await db.collection("advisories").countDocuments({
+    publishedAt: { $gte: cutoffIso },
+  });
+
+  await db.collection("sync_meta").updateOne(
+    { _id: "advisories" as any },
+    {
+      $set: {
+        _id: "advisories" as any,
+        lastSyncedAt: new Date().toISOString(),
+        totalCount: currentTotalInDb,
+        activeFloodCount,
+        durationMs: Date.now() - start,
+        retentionHours: RETENTION_HOURS,
+      },
+    },
+    { upsert: true }
+  );
+
+  console.log(`✅ [Reparse DB Complete] Successfully updated ${updatedCount} advisories, removed ${deletedForeignCount} foreign records in ${Date.now() - start}ms.`);
+  console.log(`📊 [Current Status] ${currentTotalInDb} total 24h advisories in MongoDB (${activeFloodCount} active flood alerts).`);
+}
+
+/**
+ * Main Scraper Job: Scrapes all profiles, parses NLP/hotspots, and writes to MongoDB
  */
 export async function runScraperJob() {
   const start = Date.now();
@@ -420,41 +558,53 @@ export async function runScraperJob() {
 
     const allRawItems: RawTweetInput[] = [];
 
-    // Parse --backfill flag for initial deep scrape, otherwise enforce 24-hour retention window
+    // Parse flags
+    const isForce = process.argv.includes("--force") || process.argv.includes("--force-update") || process.env.FORCE_UPDATE === "true";
     const backfillArg = process.argv.find((a) => a.startsWith("--backfill"));
     const retentionCutoff = getRetentionCutoff();
     let cutoffDate: Date = retentionCutoff;
 
     if (backfillArg) {
-      const dateStr = backfillArg.includes("=") ? backfillArg.split("=")[1] : "2026-08-15";
-      cutoffDate = new Date(dateStr);
-      console.log(`[Scraper] Backfill mode: scrolling until ${cutoffDate.toISOString().split("T")[0]}`);
+      const dateStr = backfillArg.includes("=") ? backfillArg.split("=")[1] : "";
+      if (dateStr) {
+        cutoffDate = new Date(dateStr);
+      } else {
+        // Default backfill to 48 hours for deep historical sweep
+        cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      }
+      console.log(`[Scraper] 🔄 Backfill mode active: scrolling until ${cutoffDate.toISOString().split("T")[0]}`);
     } else {
       console.log(`[Scraper] 24-hour retention window: scrolling up to ${cutoffDate.toISOString()}`);
     }
 
-    for (const handle of GOV_HANDLES) {
-      const items = await scrapeProfileWithBrowser(browser, handle, cutoffDate, "all");
-      allRawItems.push(...items);
+    if (isForce) {
+      console.log(`[Scraper] ⚡ Force-update mode active: will overwrite all existing documents in MongoDB.`);
     }
 
-    // Scrape news outlets via X search (targeted keyword queries)
+    // 1. Scrape official government accounts
+    for (const handle of GOV_HANDLES) {
+      const posts = await scrapeProfileWithBrowser(browser, handle, cutoffDate, "all");
+      allRawItems.push(...posts);
+    }
+
+    // 2. Scrape major news outlets
     for (const handle of NEWS_OUTLETS) {
       const searchUrl = buildNewsSearchUrl(handle);
-      const items = await scrapeSearchWithBrowser(browser, searchUrl, `@${handle}`, cutoffDate);
-      allRawItems.push(...items);
+      const posts = await scrapeNewsSearchTimeline(browser, handle, searchUrl, cutoffDate, `@${handle}`);
+      allRawItems.push(...posts);
     }
 
-    const db = await getDatabase();
+    console.log(`\n[Scraper Summary] Total raw posts fetched across all handles: ${allRawItems.length}`);
 
-    // 1. Housekeeping: Delete any advisories older than 24 hours from MongoDB
+    // Housekeeping: Purge advisories older than 24 hours
+    const db = await getDatabase();
     const cutoffIso = retentionCutoff.toISOString();
     try {
       const deleteResult = await db.collection("advisories").deleteMany({
         publishedAt: { $lt: cutoffIso },
       });
       if (deleteResult.deletedCount > 0) {
-        console.log(`🧹 [Retention Cleanup] Deleted ${deleteResult.deletedCount} advisories older than 24 hours from MongoDB.`);
+        console.log(`🧹 [Retention Cleanup] Deleted ${deleteResult.deletedCount} advisories older than 24 hours.`);
       }
     } catch (cleanErr: any) {
       console.warn("⚠️ [Retention Cleanup Error]:", cleanErr.message);
@@ -465,27 +615,31 @@ export async function runScraperJob() {
       return;
     }
 
-    // Parse all raw items through NLP, depth analysis, and landmark geocoder
-    // Retain only items within the 24-hour window (or cutoffDate if backfilling)
-    const advisories = allRawItems
-      .map(parseAdvisoryPost)
-      .filter((a) => new Date(a.publishedAt) >= cutoffDate)
+    // Parse all raw items through dynamic NLP, depth analysis, and dynamic geocoder
+    // Discard foreign/international events and retain only items within the retention window
+    const parsed = await Promise.all(allRawItems.map((item) => parseAdvisoryPostAsync(item)));
+    const advisories = parsed
+      .filter((a) => !isInternationalOrForeignEvent(a.rawText) && new Date(a.publishedAt) >= cutoffDate)
       .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
     const activeFloodCount = advisories.filter((a) => a.isFloodReport && a.status === "ACTIVE").length;
 
-    console.log(`[Parser] Processed ${advisories.length} advisories within 24h retention (${activeFloodCount} active flood alerts).`);
+    console.log(`[Parser] Processed ${advisories.length} advisories within retention window (${activeFloodCount} active flood alerts).`);
 
-    // Write to MongoDB with In-Memory Caching (Dirty-check before write)
-    await seedAdvisoriesCache(db);
+    // Write to MongoDB with In-Memory Caching (Dirty-check before write, unless force mode is on)
+    if (!isForce) {
+      await seedAdvisoriesCache(db);
+    }
 
-    const changedAdvisories = advisories.filter((advisory) => {
-      const hash = hashAdvisory(advisory);
-      if (knownPostHashes.get(advisory.id) === hash) {
-        return false; // Already in DB with same status
-      }
-      return true;
-    });
+    const changedAdvisories = isForce
+      ? advisories
+      : advisories.filter((advisory) => {
+          const hash = hashAdvisory(advisory);
+          if (knownPostHashes.get(advisory.id) === hash) {
+            return false; // Already in DB with same status
+          }
+          return true;
+        });
 
     if (changedAdvisories.length > 0) {
       const ops = changedAdvisories.map((advisory) => {
@@ -506,7 +660,7 @@ export async function runScraperJob() {
         knownPostHashes.set(advisory.id, hashAdvisory(advisory));
       }
 
-      console.log(`✅ [MongoDB] Saved ${changedAdvisories.length} new/updated advisories (cached ${advisories.length - changedAdvisories.length} unchanged) in ${Date.now() - start}ms.`);
+      console.log(`✅ [MongoDB] Saved ${changedAdvisories.length} ${isForce ? "force-updated" : "new/updated"} advisories in ${Date.now() - start}ms.`);
     } else {
       console.log(`⚡ [Cache Hit] All ${advisories.length} advisories are already up-to-date in MongoDB. Skipped DB writes.`);
     }
@@ -544,8 +698,14 @@ export async function runScraperJob() {
 
 // ── Runner entrypoint ──────────────────────────────────────────────────────
 const isOnce = process.argv.includes("--once");
+const isReparseDb = process.argv.includes("--reparse-db") || process.argv.includes("--reparse");
 
-if (isOnce) {
+if (isReparseDb) {
+  reparseDatabaseAdvisories().then(() => {
+    console.log("[Worker] Reparse DB complete. Exiting.");
+    process.exit(0);
+  });
+} else if (isOnce) {
   runScraperJob().then(() => {
     console.log("[Worker] Single scrape complete. Exiting.");
     process.exit(0);

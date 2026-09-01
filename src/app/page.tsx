@@ -6,7 +6,8 @@
 // ---------------------------------------------------------------------------
 
 import { useState, useEffect, useMemo } from "react";
-import { useLiveFloodStatus } from "@/hooks/useLiveFloodStatus";
+import { useTelemetry } from "@/hooks/useTelemetry";
+import { useLiveFloodStatus, formatScrapedAt } from "@/hooks/useLiveFloodStatus";
 import { useLiveAdvisories } from "@/hooks/useLiveAdvisories";
 import RoadFloodMap from "@/components/Map/RoadFloodMap";
 import RoutePlanner, { type LocationItemState } from "@/components/Navigation/RoutePlanner";
@@ -38,10 +39,19 @@ import type { LiveStation } from "@/types";
 import type { NoahRoadSegment } from "@/types/flood-engine";
 
 export default function HomePage() {
+  // 1. Dedicated Telemetry Hook (Delivers all stations nationwide)
   const {
     stations: activeStations,
-    lastUpdated,
-    refreshScraper,
+    scrapedAt: telemetryScrapedAt,
+    refresh: refreshTelemetry,
+  } = useTelemetry();
+
+  // 2. Viewport-Aware Live Flood Prediction Hook (Roads, Heatmap, Weather)
+  const {
+    evaluatedRoads: backendEvaluatedRoads,
+    heatmapPoints: backendHeatmapPoints,
+    weatherSummary,
+    updateRegion,
   } = useLiveFloodStatus();
 
   const {
@@ -110,7 +120,7 @@ export default function HomePage() {
     setSyncing(true);
     trackTelemetrySync();
     try {
-      await refreshScraper();
+      await Promise.all([refreshTelemetry(), refreshAdvisories()]);
     } finally {
       setSyncing(false);
     }
@@ -187,13 +197,20 @@ export default function HomePage() {
 
   // Formatted observation / sync timestamp
   const lastUpdatedFormatted = useMemo(() => {
-    if (!lastUpdated || isNaN(lastUpdated.getTime())) return null;
-    return lastUpdated.toLocaleTimeString("en-PH", {
+    if (!telemetryScrapedAt) return null;
+    const d = new Date(telemetryScrapedAt);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleTimeString("en-PH", {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
     });
-  }, [lastUpdated]);
+  }, [telemetryScrapedAt]);
+
+  // Formatted scrapedAt timestamp with date, time, and relative freshness
+  const scrapedAtFormatted = useMemo(() => {
+    return formatScrapedAt(telemetryScrapedAt);
+  }, [telemetryScrapedAt]);
 
   const activeRoute = routeOptions[selectedRouteIdx] || routeOptions[0];
 
@@ -231,7 +248,12 @@ export default function HomePage() {
       });
     }
 
-    // Default: Evaluate all monitored Metro Manila roads (España, EDSA, Shaw, Taft, etc.)
+    // If backend pre-calculated road evaluations are available, use them directly
+    if (backendEvaluatedRoads && backendEvaluatedRoads.length > 0) {
+      return backendEvaluatedRoads;
+    }
+
+    // Default fallback: Evaluate monitored Metro Manila roads
     const roads = noahRoadsDataset as NoahRoadSegment[];
     return roads.map((road) => {
       let sumLat = 0;
@@ -314,7 +336,7 @@ export default function HomePage() {
         description: road.description,
       };
     });
-  }, [activeRoute, activeStations]);
+  }, [activeRoute, activeStations, backendEvaluatedRoads]);
 
   // Fetch OSRM driving or walking route whenever Point A or Point B or telemetry or mode changes
   useEffect(() => {
@@ -405,6 +427,8 @@ export default function HomePage() {
       <div className="absolute inset-0 w-full h-full z-0">
         <RoadFloodMap
           stations={activeStations}
+          heatmapPoints={backendHeatmapPoints}
+          weatherSummary={weatherSummary}
           selectedStationId={selectedStationId}
           advisories={advisories}
           selectedAdvisory={selectedAdvisory}
@@ -419,6 +443,7 @@ export default function HomePage() {
           showHeatmap={showFloodHeatmap}
           showHazard={showFloodHazard}
           onSelectRoad={(risk) => setSelectedRoadRisk(risk)}
+          onRegionChange={updateRegion}
         />
       </div>
 
@@ -467,6 +492,8 @@ export default function HomePage() {
         onClose={() => setIsTelemetryOpen(false)}
         metrics={metrics}
         lastUpdatedFormatted={lastUpdatedFormatted}
+        scrapedAt={telemetryScrapedAt}
+        scrapedAtFormatted={scrapedAtFormatted}
         syncing={syncing}
         onSync={triggerTelemetrySync}
         onOpenStationsTable={() => {

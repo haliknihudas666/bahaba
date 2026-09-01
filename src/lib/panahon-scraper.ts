@@ -238,11 +238,22 @@ export function parseObservedAtToIso(observedAt: string | undefined | null): str
         s ? parseInt(s, 10) : 0
       );
       const date = new Date(utcMs);
-      if (!isNaN(date.getTime())) return date.toISOString();
+      if (!isNaN(date.getTime())) {
+        // Clamp to current time if station reports a future timestamp
+        if (date.getTime() > Date.now()) {
+          return new Date().toISOString();
+        }
+        return date.toISOString();
+      }
     }
 
     const directDate = new Date(observedAt);
-    if (!isNaN(directDate.getTime())) return directDate.toISOString();
+    if (!isNaN(directDate.getTime())) {
+      if (directDate.getTime() > Date.now()) {
+        return new Date().toISOString();
+      }
+      return directDate.toISOString();
+    }
   } catch {
     // fallback
   }

@@ -20,9 +20,35 @@ export type FloodDepthLevel =
   | "SUBSIDED"   // 0 inches (cleared)
   | "UNKNOWN";
 
+/**
+ * An individual flood location pin rendered dynamically on the map
+ */
+export interface AdvisoryLocationPin {
+  id: string;
+  roadName?: string;
+  landmark?: string;
+  city?: string;
+  direction?: "NB" | "SB" | "EB" | "WB" | "BOTH";
+  depthLevel: FloodDepthLevel;
+  depthInches: number;
+  passability: AdvisoryPassability;
+  severity: "CRITICAL" | "ALARM" | "ALERT" | "NORMAL";
+  badgeColor: "red" | "orange" | "yellow" | "green" | "blue";
+  passabilityLabel: string;
+  authorHandle?: string;
+  authorName?: string;
+  coordinates: {
+    lat: number;
+    lng: number;
+  };
+  rawLine?: string;
+}
+
 export interface ReportedAdvisory {
   id: string;
   source: AdvisorySource;
+  authorHandle?: string;
+  authorName?: string;
   postUrl: string;
   rawText: string;
   publishedAt: string; // ISO 8601 string
@@ -31,7 +57,7 @@ export interface ReportedAdvisory {
   photoUrls: string[];
 
   // Parsed flood intelligence
-  category?: "FLOOD" | "WEATHER" | "SUSPENSION" | "BULLETIN";
+  category?: "FLOOD" | "WEATHER" | "SUSPENSION" | "BULLETIN" | "NEWS";
   isFloodReport: boolean;
   roadName?: string;
   landmark?: string;
@@ -45,11 +71,14 @@ export interface ReportedAdvisory {
   badgeColor: "red" | "orange" | "yellow" | "green" | "blue";
   passabilityLabel: string;
 
-  // Spatial location
+  // Spatial location (primary coordinate)
   coordinates: {
     lat: number;
     lng: number;
   } | null;
+
+  // Multi-location pins dynamically rendered on the map (e.g. 41 flood pins from 1 bulletin post)
+  locationPins?: AdvisoryLocationPin[];
   
   status: "ACTIVE" | "SUBSIDED";
 }
@@ -72,14 +101,39 @@ export const ADVISORY_MAP_PIN_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours (21,60
 
 /**
  * Determines whether a reported advisory should be visible as a pin on the map.
- * Pins are only visible if they have valid geographic coordinates and were published
- * within the last 6 hours.
+ * Pins are visible if the advisory is an active/subsided flood report, has valid
+ * non-zero coordinates within the Philippines, and was published within the last 6 hours.
  */
 export function isAdvisoryPinVisible(
   advisory: ReportedAdvisory,
   now: number = Date.now()
 ): boolean {
-  if (!advisory.coordinates || !advisory.coordinates.lat || !advisory.coordinates.lng) {
+  if (!advisory.isFloodReport) {
+    return false;
+  }
+
+  const hasValidCoords =
+    (advisory.coordinates &&
+      advisory.coordinates.lat !== 0 &&
+      advisory.coordinates.lng !== 0 &&
+      advisory.coordinates.lat >= 4.5 &&
+      advisory.coordinates.lat <= 21.5 &&
+      advisory.coordinates.lng >= 116.5 &&
+      advisory.coordinates.lng <= 127.0) ||
+    (advisory.locationPins &&
+      advisory.locationPins.length > 0 &&
+      advisory.locationPins.some(
+        (p) =>
+          p.coordinates &&
+          p.coordinates.lat !== 0 &&
+          p.coordinates.lng !== 0 &&
+          p.coordinates.lat >= 4.5 &&
+          p.coordinates.lat <= 21.5 &&
+          p.coordinates.lng >= 116.5 &&
+          p.coordinates.lng <= 127.0
+      ));
+
+  if (!hasValidCoords) {
     return false;
   }
   if (!advisory.publishedAt) {

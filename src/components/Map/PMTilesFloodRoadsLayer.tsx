@@ -8,10 +8,7 @@
 // using protomaps-leaflet on HTML5 Canvas.
 //
 // Live Hydro-Predictive Coloring:
-// - Dynamically calculates water depth and flood risk for each map tile by fusing:
-//   1. Live PAGASA Hydrological Station Telemetry (rain1h, rain24h, water levels)
-//   2. Live Open-Meteo precipitation rate (mm/hr & 24h accumulated)
-//   3. UP NOAH 100-Year Flood Hazard & Elevation Model (calculateWaterDepth)
+// - Dynamically colors roads based on backend-synchronized rainfall & telemetry
 // - Roads experiencing standing water depth >= 6 cm turn:
 //     • Gutter Deep (6–15 cm): Orange (#f97316)
 //     • Half-Tire Deep (16–30 cm): Red (#ef4444)
@@ -19,7 +16,7 @@
 // - Clear / dry roads render in a clean, high-contrast cyan/slate dark-mode palette.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import * as protomapsL from "protomaps-leaflet";
 import { createCachedPMTiles } from "@/lib/pmtiles/cachedSource";
 import type { LiveStation } from "@/types";
@@ -67,7 +64,11 @@ interface PMTilesFloodRoadsLayerProps {
   visible?: boolean;
   /** Active PAGASA telemetry stations */
   stations?: LiveStation[];
-  /** Whether background roads should be dimmed (e.g. when route is active / route has flood) */
+  /** Rain rate in mm/hr from backend */
+  rainRate?: number;
+  /** 24h rain accumulation in mm from backend */
+  rain24h?: number;
+  /** Whether background roads should be dimmed */
   dimmed?: boolean;
 }
 
@@ -75,30 +76,17 @@ export default function PMTilesFloodRoadsLayer({
   map,
   visible = true,
   stations = [],
+  rainRate = 0,
+  rain24h = 0,
   dimmed = false,
 }: PMTilesFloodRoadsLayerProps) {
   const layerRef = useRef<any>(null);
-  const isMountedRef = useRef<boolean>(true);
   const stationsRef = useRef<LiveStation[]>(stations);
   const dimmedRef = useRef<boolean>(dimmed);
-  const [rainRate, setRainRate] = useState<number>(0);
-  const [rain24h, setRain24h] = useState<number>(0);
-  const rainRateRef = useRef<number>(0);
-  const rain24hRef = useRef<number>(0);
-  const lastFetchedCenterRef = useRef<{ lat: number; lng: number; time: number }>({
-    lat: 0,
-    lng: 0,
-    time: 0,
-  });
+  const rainRateRef = useRef<number>(rainRate);
+  const rain24hRef = useRef<number>(rain24h);
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  // Update dimmed ref and redraw only when dimming state actually changes
+  // Update dimmed ref and redraw only when dimming state changes
   useEffect(() => {
     if (dimmedRef.current !== dimmed) {
       dimmedRef.current = dimmed;
@@ -108,79 +96,17 @@ export default function PMTilesFloodRoadsLayer({
     }
   }, [dimmed]);
 
-  // Update stations ref and redraw only when station data changes
+  // Update stations ref and redraw when stations change
   useEffect(() => {
     stationsRef.current = stations;
-  }, [stations]);
-
-  // Keep rainfall in ref and trigger debounced redraw when weather updates
-  useEffect(() => {
     rainRateRef.current = rainRate;
     rain24hRef.current = rain24h;
-  }, [rainRate, rain24h]);
-
-  // 1. Fetch live Open-Meteo rainfall for current map center (debounced & distance-throttled)
-  const fetchOpenMeteoRainfall = useCallback(async (lat: number, lng: number) => {
-    const now = Date.now();
-    const last = lastFetchedCenterRef.current;
-    const distMoved = Math.hypot(lat - last.lat, lng - last.lng);
-
-    // Only query API if map moved > ~5km (0.045 deg) or > 60 seconds elapsed
-    if (distMoved < 0.045 && now - last.time < 60000) return;
-    lastFetchedCenterRef.current = { lat, lng, time: now };
-
-    try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=precipitation,rain&hourly=precipitation`;
-      const res = await fetch(url);
-      if (!res.ok) return;
-
-      const data = await res.json();
-      const currentRain = data.current?.precipitation ?? data.current?.rain ?? 0;
-
-      let acc24h = 0;
-      if (data.hourly?.precipitation && Array.isArray(data.hourly.precipitation)) {
-        const last24 = data.hourly.precipitation.slice(0, 24);
-        acc24h = last24.reduce((sum: number, val: number) => sum + (val || 0), 0);
-      }
-
-      if (isMountedRef.current) {
-        setRainRate(Math.max(0, currentRain));
-        setRain24h(Math.max(0, acc24h));
-      }
-    } catch (err) {
-      console.warn("[PMTilesFloodRoadsLayer Open-Meteo Fetch Warning]", err);
+    if (layerRef.current && typeof layerRef.current.redraw === "function") {
+      layerRef.current.redraw();
     }
-  }, []);
+  }, [stations, rainRate, rain24h]);
 
-  // Update rainfall on map move (debounced)
-  useEffect(() => {
-    if (!map || !map._loaded) return;
-
-    let timeoutId: NodeJS.Timeout | null = null;
-    const handleViewChange = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        try {
-          const center = map.getCenter();
-          if (center && typeof center.lat === "number" && typeof center.lng === "number") {
-            fetchOpenMeteoRainfall(center.lat, center.lng);
-          }
-        } catch {}
-      }, 500);
-    };
-
-    handleViewChange();
-    map.on("moveend", handleViewChange);
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      try {
-        map.off("moveend", handleViewChange);
-      } catch {}
-    };
-  }, [map, fetchOpenMeteoRainfall]);
-
-  // 2. Initialize Hardware-Accelerated PMTiles Vector Layer
+  // Initialize Hardware-Accelerated PMTiles Vector Layer
   useEffect(() => {
     if (!map || typeof window === "undefined" || !map._loaded) return;
 
@@ -498,4 +424,3 @@ export default function PMTilesFloodRoadsLayer({
 
   return null;
 }
-

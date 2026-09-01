@@ -13,11 +13,14 @@ import LiveAdvisoryOverlayLayer from "./LiveAdvisoryOverlayLayer";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
 import type { RouteSegmentData, TravelMode } from "@/lib/engine/routeSolver";
 import type { ReportedAdvisory } from "@/types/advisory";
+import type { FloodHeatmapPoint } from "@/lib/flood-engine";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface RoadFloodMapProps {
   /** Active PAGASA telemetry stations */
   stations: LiveStation[];
+  /** Precalculated heatmap points from backend */
+  heatmapPoints?: FloodHeatmapPoint[];
   /** Selected station ID for focus */
   selectedStationId?: string | null;
   /** Active reported road flood advisories */
@@ -48,10 +51,22 @@ interface RoadFloodMapProps {
   showHeatmap?: boolean;
   /** UP NOAH Hazard PMTiles overlay active state */
   showHazard?: boolean;
+  /** Regional weather summary from backend */
+  weatherSummary?: {
+    metroManilaRainMmHr: number;
+    metroManilaRain24hMm: number;
+    forecast3hTotalMm: number;
+    trend: string;
+    conditionLabel: string;
+  } | null;
+  /** Callback when user navigates to a new region/city across the Philippines */
+  onRegionChange?: (lat: number, lng: number, bbox?: [number, number, number, number]) => void;
 }
 
 export default function RoadFloodMap({
   stations,
+  heatmapPoints = [],
+  weatherSummary = null,
   selectedStationId,
   advisories = [],
   selectedAdvisory = null,
@@ -67,12 +82,20 @@ export default function RoadFloodMap({
   recenterTrigger = 0,
   showHeatmap = true,
   showHazard = false,
+  onRegionChange,
 }: RoadFloodMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
   const routeLayerGroupRef = useRef<any>(null);
   const stationMarkersRef = useRef<Map<string, any>>(new Map());
   const [mapLoaded, setMapLoaded] = useState(false);
+  const lastSyncedCenterRef = useRef<{ lat: number; lng: number }>({ lat: 14.633, lng: 121.095 });
+  const lastSyncedZoomRef = useRef<number>(12);
+  const onRegionChangeRef = useRef(onRegionChange);
+
+  useEffect(() => {
+    onRegionChangeRef.current = onRegionChange;
+  }, [onRegionChange]);
 
   // 1. Initialize Leaflet Map Instance with Canvas Renderer
   useEffect(() => {
@@ -98,6 +121,45 @@ export default function RoadFloodMap({
           '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://protomaps.com/" target="_blank" rel="noopener">Protomaps</a>'
         );
       }
+
+      // Debounced region & zoom change listener when panning/zooming across provinces or into cities
+      let moveTimeout: NodeJS.Timeout | null = null;
+      const handleViewChange = () => {
+        if (moveTimeout) clearTimeout(moveTimeout);
+        moveTimeout = setTimeout(() => {
+          try {
+            const center = map.getCenter();
+            const bounds = map.getBounds();
+            const currentZoom = map.getZoom();
+            if (center && typeof center.lat === "number" && typeof center.lng === "number" && bounds) {
+              const lastCenter = lastSyncedCenterRef.current;
+              const lastZoom = lastSyncedZoomRef.current;
+              const distMoved = Math.hypot(center.lat - lastCenter.lat, center.lng - lastCenter.lng);
+              const zoomChanged = Math.abs(currentZoom - lastZoom) >= 1.0;
+
+              // Adaptive threshold: finer resolution when zoomed in (~5km at zoom >= 13, ~12km at regional zoom)
+              const panThreshold = currentZoom >= 13 ? 0.045 : 0.11;
+
+              if (distMoved >= panThreshold || zoomChanged) {
+                lastSyncedCenterRef.current = { lat: center.lat, lng: center.lng };
+                lastSyncedZoomRef.current = currentZoom;
+                if (typeof onRegionChangeRef.current === "function") {
+                  const bbox: [number, number, number, number] = [
+                    bounds.getSouth(),
+                    bounds.getWest(),
+                    bounds.getNorth(),
+                    bounds.getEast(),
+                  ];
+                  onRegionChangeRef.current(center.lat, center.lng, bbox);
+                }
+              }
+            }
+          } catch {}
+        }, 800);
+      };
+
+      map.on("moveend", handleViewChange);
+      map.on("zoomend", handleViewChange);
 
       map.whenReady(() => {
         map.invalidateSize();
@@ -654,6 +716,7 @@ export default function RoadFloodMap({
           <FloodHeatmapLayer
             map={leafletMapRef.current}
             stations={stations}
+            heatmapPoints={heatmapPoints}
             visible={showHeatmap}
           />
           <NOAHFloodHazardLayer
@@ -664,6 +727,8 @@ export default function RoadFloodMap({
             map={leafletMapRef.current}
             visible={true}
             stations={stations}
+            rainRate={weatherSummary?.metroManilaRainMmHr ?? 0}
+            rain24h={weatherSummary?.metroManilaRain24hMm ?? 0}
             dimmed={hasActiveRoute}
           />
           <LiveAdvisoryOverlayLayer

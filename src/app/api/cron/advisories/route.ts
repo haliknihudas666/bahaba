@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { getCollection } from "@/lib/mongodb";
 import { scrapeAdvisories } from "@/lib/advisories/scraper";
+import { parseAdvisoryPostAsync, isInternationalOrForeignEvent } from "@/lib/advisories/parser";
 import type { ReportedAdvisory, AdvisorySyncResult } from "@/types/advisory";
 
 interface CacheEntry {
@@ -67,7 +68,65 @@ export async function GET(req?: Request): Promise<NextResponse<AdvisorySyncResul
       .toArray();
 
     if (docs.length > 0) {
-      const advisories: ReportedAdvisory[] = docs as unknown as ReportedAdvisory[];
+      const validDocs = (docs as unknown as ReportedAdvisory[]).filter(
+        (doc) => !isInternationalOrForeignEvent(doc.rawText)
+      );
+
+      const advisories: ReportedAdvisory[] = await Promise.all(
+        validDocs.map(async (doc) => {
+          // If advisory has multi-location text, flood keywords, or conversational landmarks but is missing locationPins, dynamically resolve it!
+          if (
+            (!doc.locationPins || doc.locationPins.length === 0) &&
+            doc.rawText &&
+            /(gutter|knee|tire|waist|chest|passable|not passable|macarthur|araneta|espa[nñ]a|edsa|taft|pegasus|fatima|ust|baha|flood|near|tapat|kanto|corner|malapit)/i.test(
+              doc.rawText
+            )
+          ) {
+            try {
+              const reparsed = await parseAdvisoryPostAsync({
+                id: doc.id,
+                text: doc.rawText,
+                author: doc.authorHandle || doc.source,
+                createdAt: doc.publishedAt,
+                url: doc.postUrl,
+                photoUrls: doc.photoUrls,
+              });
+              if (reparsed.locationPins && reparsed.locationPins.length > 0) {
+                // Asynchronously update MongoDB document
+                advisoriesCol
+                  .updateOne(
+                    { id: doc.id },
+                    {
+                      $set: {
+                        locationPins: reparsed.locationPins,
+                        coordinates: reparsed.coordinates,
+                        roadName: reparsed.roadName,
+                        landmark: reparsed.landmark,
+                        direction: reparsed.direction,
+                        severity: reparsed.severity,
+                        passability: reparsed.passability,
+                        passabilityLabel: reparsed.passabilityLabel,
+                        depthLevel: reparsed.depthLevel,
+                        depthInches: reparsed.depthInches,
+                        badgeColor: reparsed.badgeColor,
+                        category: reparsed.category,
+                        isFloodReport: reparsed.isFloodReport,
+                        authorHandle: reparsed.authorHandle,
+                        authorName: reparsed.authorName,
+                      },
+                    }
+                  )
+                  .catch(() => {});
+                return reparsed;
+              }
+            } catch (err) {
+              console.warn("[Advisories Route] Could not reparsed doc:", doc.id, err);
+            }
+          }
+          return doc;
+        })
+      );
+
       const activeFloodCount = advisories.filter(
         (a) => a.isFloodReport && a.status === "ACTIVE"
       ).length;

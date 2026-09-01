@@ -12,7 +12,8 @@
     "test:noah": "tsx src/lib/engine/__tests__/noah-predictor.test.ts",
     "test:route-solver": "tsx src/lib/engine/__tests__/route-solver.test.ts",
     "test:grid": "tsx src/lib/engine/__tests__/live-flood-grid.test.ts",
-    "test:advisories": "tsx src/lib/advisories/__tests__/advisory-visibility.test.ts"
+    "test:modular-engine": "tsx src/lib/flood-engine/__tests__/modular-flood-engine.test.ts",
+    "test:advisories": "tsx src/lib/advisories/__tests__/advisory-visibility.test.ts && tsx src/lib/advisories/__tests__/dynamic-parser.test.ts && tsx src/lib/advisories/__tests__/multi-source-nlp.test.ts"
   },
   "dependencies": {
     "axios": "^1.7.9",

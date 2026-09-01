@@ -12,6 +12,8 @@ interface TelemetrySidePanelProps {
   onClose: () => void;
   metrics: TelemetryMetrics;
   lastUpdatedFormatted: string | null;
+  scrapedAt?: string | null;
+  scrapedAtFormatted?: string | null;
   syncing: boolean;
   onSync: () => void;
   onOpenStationsTable: () => void;
@@ -24,6 +26,8 @@ export default function TelemetrySidePanel({
   onClose,
   metrics,
   lastUpdatedFormatted,
+  scrapedAt,
+  scrapedAtFormatted,
   syncing,
   onSync,
   onOpenStationsTable,
@@ -52,11 +56,10 @@ export default function TelemetrySidePanel({
 
   return (
     <div
-      className={`fixed inset-0 sm:inset-auto sm:top-20 sm:right-4 sm:bottom-6 z-[550] w-full sm:w-[380px] md:w-[410px] max-w-full sm:max-w-[calc(100vw-32px)] flex flex-col pointer-events-auto transition-all duration-300 ease-in-out ${
-        isOpen
+      className={`fixed inset-0 sm:inset-auto sm:top-20 sm:right-4 sm:bottom-6 z-[550] w-full sm:w-[380px] md:w-[410px] max-w-full sm:max-w-[calc(100vw-32px)] flex flex-col pointer-events-auto transition-all duration-300 ease-in-out ${isOpen
           ? "translate-x-0 opacity-100"
           : "translate-x-full sm:translate-x-[calc(100%+32px)] pointer-events-none opacity-0"
-      }`}
+        }`}
     >
       <div className="bg-slate-950 sm:bg-slate-900/95 sm:backdrop-blur-2xl border-0 sm:border border-slate-800/90 rounded-none sm:rounded-3xl shadow-2xl flex flex-col h-full max-h-full overflow-hidden">
         {/* ── 1. SIDEBAR HEADER ────────────────────────────────────────── */}
@@ -93,12 +96,15 @@ export default function TelemetrySidePanel({
 
         {/* ── 2. LIVE SYNC & OBSERVATION STATUS BAR ─────────────────────── */}
         <div className="px-3.5 py-2.5 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between gap-2 flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-xs">🕒</span>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-slate-400 font-medium">Last Live Sync</span>
-              <strong className="text-slate-200 font-mono text-[11px]">
-                {lastUpdatedFormatted || "Connecting..."}
+          <div className="flex items-center gap-2 text-xs min-w-0">
+            <span className="text-xs flex-shrink-0">🕒</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-slate-400 font-medium">Scraped At</span>
+              <strong
+                className="text-slate-200 font-mono text-[11px] truncate"
+                title={scrapedAt || undefined}
+              >
+                {scrapedAtFormatted || lastUpdatedFormatted || "Connecting..."}
               </strong>
             </div>
           </div>
@@ -155,20 +161,18 @@ export default function TelemetrySidePanel({
 
           {/* Card 2: Active Flood Warnings & Elevated Gauges */}
           <div
-            className={`p-3.5 rounded-2xl border transition-all shadow-md ${
-              metrics.highRisk > 0
+            className={`p-3.5 rounded-2xl border transition-all shadow-md ${metrics.highRisk > 0
                 ? "bg-amber-950/30 border-amber-800/70 shadow-amber-950/20"
                 : "bg-emerald-950/30 border-emerald-800/70"
-            }`}
+              }`}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2">
                 <div
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center text-base border ${
-                    metrics.highRisk > 0
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center text-base border ${metrics.highRisk > 0
                       ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
                       : "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                  }`}
+                    }`}
                 >
                   {metrics.highRisk > 0 ? "⚠️" : "✅"}
                 </div>
@@ -177,20 +181,18 @@ export default function TelemetrySidePanel({
                     Active Flood Alerts
                   </div>
                   <div
-                    className={`text-lg sm:text-xl font-black font-mono leading-none mt-0.5 ${
-                      metrics.highRisk > 0 ? "text-amber-300" : "text-emerald-300"
-                    }`}
+                    className={`text-lg sm:text-xl font-black font-mono leading-none mt-0.5 ${metrics.highRisk > 0 ? "text-amber-300" : "text-emerald-300"
+                      }`}
                   >
                     {metrics.highRisk} Stations Elevated
                   </div>
                 </div>
               </div>
               <span
-                className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                  metrics.highRisk > 0
+                className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${metrics.highRisk > 0
                     ? "bg-amber-500/20 border-amber-500/50 text-amber-300 animate-pulse"
                     : "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
-                }`}
+                  }`}
               >
                 {metrics.highRisk > 0 ? "Warning Active" : "All Normal"}
               </span>

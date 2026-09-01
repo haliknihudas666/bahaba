@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AdvisorySyncResult, ReportedAdvisory } from "@/types/advisory";
-import { parseAdvisoryPost, type RawTweetInput } from "./parser";
+import { parseAdvisoryPostAsync, isInternationalOrForeignEvent, type RawTweetInput } from "./parser";
 
 /**
  * Ingest live advisories from a configured API/scraper endpoint.
@@ -134,11 +134,11 @@ export async function scrapeAdvisories(): Promise<AdvisorySyncResult> {
     }
   }
 
-  // Parse all raw inputs through NLP & geocoder (enforcing 24h retention window)
+  // Parse all raw inputs dynamically through multi-location NLP & dynamic geocoder (enforcing 24h retention window and discarding international events)
   const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
-  const advisories: ReportedAdvisory[] = rawItems
-    .map(parseAdvisoryPost)
-    .filter((a) => new Date(a.publishedAt).getTime() >= cutoffMs)
+  const parsed = await Promise.all(rawItems.map((item) => parseAdvisoryPostAsync(item)));
+  const advisories: ReportedAdvisory[] = parsed
+    .filter((a) => !isInternationalOrForeignEvent(a.rawText) && new Date(a.publishedAt).getTime() >= cutoffMs)
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
   const activeFloodCount = advisories.filter(

@@ -289,7 +289,7 @@ export default function AdvisoryWallModal({
                 >
                   {/* Top Meta Line */}
                   <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span
                         className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
                           advisory.source === "MMDA"
@@ -301,8 +301,18 @@ export default function AdvisoryWallModal({
                             : "bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
                         }`}
                       >
-                        {advisory.source === "NEWS" ? "📰 News Report" : `${advisory.source} Official`}
+                        {advisory.authorName && !/^(news|news report)$/i.test(advisory.authorName)
+                          ? advisory.authorName
+                          : advisory.source === "NEWS"
+                          ? "📰 News Report"
+                          : `${advisory.source} Official`}
                       </span>
+
+                      {advisory.authorHandle && !/^(news|search|feed|unknown|undefined|null)$/i.test(advisory.authorHandle) && (
+                        <span className="text-[11px] font-semibold text-cyan-400">
+                          @{advisory.authorHandle.replace(/^@/, "")}
+                        </span>
+                      )}
 
                       <span className="text-[11px] text-slate-400">
                         {formatTimeAgo(advisory.publishedAt)}
@@ -324,6 +334,16 @@ export default function AdvisoryWallModal({
                       {advisory.passabilityLabel}
                     </span>
                   </div>
+
+                  {/* Multi-location badge if present */}
+                  {advisory.locationPins && advisory.locationPins.length > 1 && (
+                    <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 flex items-center gap-1">
+                        <span>🗺️</span>
+                        <span>{advisory.locationPins.length} Flood Locations Pinned on Map</span>
+                      </span>
+                    </div>
+                  )}
 
                   {/* Road Highlight if matched */}
                   {advisory.roadName && (

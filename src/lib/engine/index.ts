@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Bahaba – Flood Engine: Barrel Export
+// Bahaba – Flood Engine: Modular Barrel Export
 // ---------------------------------------------------------------------------
 
 export { extractFeatures, calculateFloodRisk } from "./heuristics";
@@ -25,11 +25,33 @@ export {
 } from "./floodPredictor";
 
 export {
-  fetchDistrictRainfall,
-  batchFetchDistrictRainfall,
+  getElevation,
+  getElevationsForCoordinates,
+  estimateFallbackElevation,
+} from "@/lib/elevation";
+
+export {
+  getNearestNoahHazard,
+  getNoahRoadSegments,
+  NOAH_METRO_MANILA_HOTSPOTS,
+} from "@/lib/noah";
+
+export {
+  getDistrictRainfall,
+  getLatestTelemetryStations,
+  interpolateRainfall,
   type DistrictRainfall,
   type RainfallTrend,
-} from "@/lib/geo/meteo-rainfall";
+} from "@/lib/weather";
+
+export {
+  evaluateLocation,
+  evaluateMonitoredRoads,
+  evaluateHeatmapPoints,
+  type EvaluatedLocation,
+  type EvaluatedRoadRisk,
+  type FloodHeatmapPoint,
+} from "@/lib/flood-engine";
 
 export type {
   RouteOption,
@@ -58,11 +80,8 @@ export type {
 } from "./roadRisk";
 
 export {
-  interpolateRainfall,
   estimateInundationAtLocation,
   generateFloodHeatmapPoints,
   METRO_MANILA_FLOOD_HOTSPOTS,
-  type FloodHeatmapPoint,
   type SpatialInundationEstimate,
 } from "./liveFloodGrid";
-

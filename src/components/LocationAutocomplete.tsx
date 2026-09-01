@@ -54,7 +54,7 @@ export default function LocationAutocomplete({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch location results from OpenStreetMap Nominatim API as user types
+  // Fetch location results from internal geocoding API route as user types
   useEffect(() => {
     if (!query || query.trim().length < 2) {
       setSuggestions([]);
@@ -66,34 +66,23 @@ export default function LocationAutocomplete({
     const timer = setTimeout(async () => {
       setLoadingRemote(true);
       try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&countrycodes=ph&limit=10`;
+        const url = `/api/geocode?q=${encodeURIComponent(trimmed)}`;
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            const remoteItems: MetroLocationItem[] = data.map((item: any, idx: number) => {
-              const namePart = item.display_name.split(",")[0] || item.display_name;
-              const subtextParts = item.display_name.split(",").slice(1, 3).join(",").trim();
-              return {
-                id: `nominatim-${idx}-${item.place_id}`,
-                name: namePart,
-                subtext: subtextParts || " Philippines",
-                category: "landmark" as const,
-                coords: [parseFloat(item.lat), parseFloat(item.lon)],
-              };
-            });
-            setSuggestions(remoteItems);
+          if (Array.isArray(data.results) && data.results.length > 0) {
+            setSuggestions(data.results);
           } else {
             setSuggestions([]);
           }
         }
       } catch (err) {
-        // Silent error on network failure
+        // Silent fallback on network failure
         setSuggestions([]);
       } finally {
         setLoadingRemote(false);
       }
-    }, 300);
+    }, 350);
 
     return () => clearTimeout(timer);
   }, [query]);

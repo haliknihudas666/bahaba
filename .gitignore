@@ -49,3 +49,5 @@ public/*.pmtiles
 
 # X/Twitter auth cookies (contains session tokens - NEVER commit)
 services/advisory-scraper/x-auth.json
+
+mobile/

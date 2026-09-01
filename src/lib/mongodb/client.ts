@@ -3,7 +3,18 @@
 // Caches connection pool in development across Next.js HMR reloads.
 // ---------------------------------------------------------------------------
 
+import dns from "node:dns";
 import { MongoClient, Db, Collection, Document } from "mongodb";
+
+// Fix for Windows / Node / Bun c-ares DNS resolving to localhost 127.0.0.1 for SRV records
+try {
+  const currentServers = dns.getServers();
+  if (!currentServers.length || currentServers.every((s) => s === "127.0.0.1" || s === "::1")) {
+    dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+  }
+} catch {
+  // Ignore in environments where setServers is restricted
+}
 
 const uri = process.env.MONGODB_URI || "";
 const defaultDbName = process.env.MONGODB_DB || "bahaba";

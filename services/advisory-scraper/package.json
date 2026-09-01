@@ -6,7 +6,10 @@
   "scripts": {
     "start": "tsx worker.ts",
     "dev": "tsx watch worker.ts",
-    "scrape:once": "tsx worker.ts --once"
+    "scrape:once": "tsx worker.ts --once",
+    "scrape:force": "tsx worker.ts --once --force",
+    "scrape:backfill": "tsx worker.ts --once --backfill --force",
+    "reparse:db": "tsx worker.ts --reparse-db"
   },
   "devDependencies": {
     "tsx": "^4.19.0"

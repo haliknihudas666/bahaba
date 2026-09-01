@@ -4,11 +4,10 @@
 // Bahaba – Canvas Flood Inundation Prediction Heatmap Layer Component
 //
 // Renders a continuous, dynamic flood risk heatmap surface across
-// Metro Manila by interpolating live PAGASA telemetry, Open-Meteo rainfall,
-// and UP NOAH flood hazard zones.
+// Metro Manila by drawing backend precalculated heatmap points on HTML5 Canvas.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import type { LiveStation } from "@/types";
 import {
   generateFloodHeatmapPoints,
@@ -19,7 +18,9 @@ interface FloodHeatmapLayerProps {
   /** Leaflet map instance */
   map: any;
   /** Active PAGASA telemetry stations */
-  stations: LiveStation[];
+  stations?: LiveStation[];
+  /** Precalculated heatmap points from backend */
+  heatmapPoints?: FloodHeatmapPoint[];
   /** Whether the heatmap layer is visible */
   visible: boolean;
 }
@@ -29,8 +30,6 @@ interface FloodHeatmapLayerProps {
  */
 function getHeatmapGradient(ctx: CanvasRenderingContext2D, radius: number, intensity: number): CanvasGradient {
   const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-
-  // Clamp intensity 0.0 to 1.0
   const i = Math.min(1.0, Math.max(0.0, intensity));
 
   if (i >= 0.7) {
@@ -62,85 +61,29 @@ function getHeatmapGradient(ctx: CanvasRenderingContext2D, radius: number, inten
 
 export default function FloodHeatmapLayer({
   map,
-  stations,
+  stations = [],
+  heatmapPoints,
   visible,
 }: FloodHeatmapLayerProps) {
   const layerRef = useRef<any>(null);
-  const [rainRate, setRainRate] = useState<number>(10);
-  const [rain24h, setRain24h] = useState<number>(30);
-  const heatmapPointsRef = useRef<FloodHeatmapPoint[]>([]);
+  const activePointsRef = useRef<FloodHeatmapPoint[]>([]);
 
-  const lastFetchedCenterRef = useRef<{ lat: number; lng: number; time: number }>({
-    lat: 0,
-    lng: 0,
-    time: 0,
-  });
-
-  // 1. Fetch live Open-Meteo rainfall for active viewport center (distance-throttled)
-  const fetchOpenMeteo = useCallback(async (lat: number, lng: number) => {
-    const now = Date.now();
-    const last = lastFetchedCenterRef.current;
-    const distMoved = Math.hypot(lat - last.lat, lng - last.lng);
-
-    if (distMoved < 0.045 && now - last.time < 60000) return;
-    lastFetchedCenterRef.current = { lat, lng, time: now };
-
-    try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=precipitation,rain&hourly=precipitation`;
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const data = await res.json();
-      const current = data.current?.precipitation ?? data.current?.rain ?? 0;
-      let acc24 = 0;
-      if (Array.isArray(data.hourly?.precipitation)) {
-        acc24 = data.hourly.precipitation.slice(0, 24).reduce((a: number, b: number) => a + (b || 0), 0);
-      }
-      setRainRate(Math.max(0, current));
-      if (acc24 > 0) setRain24h(acc24);
-    } catch {
-      // Fallback silently
+  // 1. Sync heatmap points from backend or compute fallback
+  useEffect(() => {
+    if (heatmapPoints && heatmapPoints.length > 0) {
+      activePointsRef.current = heatmapPoints;
+    } else {
+      activePointsRef.current = generateFloodHeatmapPoints(stations, 0, 0);
     }
-  }, []);
 
-  // Update center weather on map move (debounced)
-  useEffect(() => {
-    if (!map || !map._loaded) return;
-
-    let timeoutId: NodeJS.Timeout | null = null;
-    const onMove = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        try {
-          const c = map.getCenter();
-          if (c && typeof c.lat === "number" && typeof c.lng === "number") {
-            fetchOpenMeteo(c.lat, c.lng);
-          }
-        } catch {}
-      }, 500);
-    };
-
-    onMove();
-    map.on("moveend", onMove);
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      try {
-        map.off("moveend", onMove);
-      } catch {}
-    };
-  }, [map, fetchOpenMeteo]);
-
-  // 2. Generate updated heatmap points
-  useEffect(() => {
-    heatmapPointsRef.current = generateFloodHeatmapPoints(stations, rainRate, rain24h);
     if (layerRef.current && map && map._loaded) {
       try {
         layerRef.current.redraw();
       } catch {}
     }
-  }, [stations, rainRate, rain24h, map]);
+  }, [heatmapPoints, stations, map]);
 
-  // 3. Initialize Custom Leaflet GridLayer Canvas Renderer
+  // 2. Initialize Custom Leaflet GridLayer Canvas Renderer
   useEffect(() => {
     const L = (window as any).L;
     if (!L || !map || !map._loaded) return;
@@ -164,7 +107,7 @@ export default function FloodHeatmapLayer({
           // Pad bounds slightly to allow smooth blending across tile borders
           const paddedBounds = bounds.pad(0.35);
 
-          const points = heatmapPointsRef.current;
+          const points = activePointsRef.current;
           if (!points || points.length === 0) return tile;
 
           ctx.globalCompositeOperation = "source-over";
@@ -179,7 +122,7 @@ export default function FloodHeatmapLayer({
 
             // Scale radius based on zoom level (z=10..18)
             const zoomScale = Math.pow(1.18, Math.max(0, coords.z - 12));
-            const radius = Math.max(25, pt.radius * zoomScale);
+            const radius = Math.max(25, (pt.radius || 35) * zoomScale);
 
             ctx.save();
             ctx.translate(tilePixelX, tilePixelY);

@@ -1,8 +1,5 @@
 // ---------------------------------------------------------------------------
-// Bahaba (Baha ba? / "Is It Flooded?") – Elevation Service Adapter
-//
-// Delegates to the modular MongoDB-backed elevation store in `src/lib/elevation`
-// for seamless backward compatibility.
+// Bahaba – Elevation Module Barrel Export
 // ---------------------------------------------------------------------------
 
 export {
@@ -10,4 +7,5 @@ export {
   getElevationsForCoordinates,
   estimateFallbackElevation,
   toElevationGridKey,
-} from "@/lib/elevation";
+  type ElevationDoc,
+} from "./elevationStore";
