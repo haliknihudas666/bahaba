@@ -1,68 +1,73 @@
-# 🌊 Bahaba (Baha ba?) — Real-Time Metro Manila Flood Monitoring & Route Solver
+# 🌊 Bahaba (Baha ba?) — Real-Time Flood Monitoring, Navigation & Hazard Solver
 
 > *"Baha ba?"* — Tagalog for **"Is It Flooded?"**
 
-![Bahaba Interface Screenshot](bahaba.jpg)
+![Bahaba Interface Screenshot](bahaba.jpeg)
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.0-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.1.0-blue?style=for-the-badge&logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.1-38bdf8?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
-[![Firebase](https://img.shields.io/badge/Firebase-Firestore-ffca28?style=for-the-badge&logo=firebase)](https://firebase.google.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-6.21-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
 [![Leaflet](https://img.shields.io/badge/Leaflet-1.9.4-199900?style=for-the-badge&logo=leaflet)](https://leafletjs.com/)
+[![PWA Ready](https://img.shields.io/badge/PWA-Ready-5A0FC8?style=for-the-badge&logo=pwa)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-**Bahaba** is an open-source, hyper-local flood monitoring, hazard prediction, and turn-by-turn navigation platform built for Metro Manila and the Philippine river basins. It combines live hydrological and weather telemetry from **DOST-PAGASA Panahon API (AWS, River Basin Water Levels & Rain Gauges, Synoptic Stations, Cyclone Tracking)**, evaluates road surface inundation depths using hydro-predictive heuristics and machine learning models, and computes flood risk along turn-by-turn **Driving** and **Walking** routes.
+**Bahaba** is an open-source, hyper-local flood monitoring, hazard prediction, turn-by-turn navigation platform, and official social bulletin hub built for Metro Manila and the Philippine river basins. It ingests live hydrological and meteorological telemetry from the **DOST-PAGASA Panahon API (AWS, River Basin Water Levels & Rain Gauges, Synoptic Stations, Cyclone Tracking)**, scrapes real-time official bulletins and news advisories (MMDA, NDRRMC, PAGASA, and news networks), evaluates road inundation depths using hydro-predictive heuristics and machine learning models, and computes flood risk along turn-by-turn **Driving** and **Walking** routes with 1-click external navigation launchers (**Google Maps**, **Waze**, and **Apple Maps**).
 
 ---
 
 ## 🌟 Key Features
 
-### 📡 DOST-PAGASA Panahon Telemetry Ingestion Pipeline
-- **DOST-PAGASA Panahon API Integration**: Direct nationwide telemetry consumption from DOST-PAGASA's unified Panahon portal (`https://www.panahon.gov.ph`), including:
-  - **Automated Weather Stations (AWS)**: 1-hour and 24-hour rainfall accumulation, temperature, heat index, relative humidity, atmospheric pressure, and wind vectors across hundreds of nationwide stations.
-  - **River Basin Hydrology**: Real-time river water levels in meters ($m$) and catchment rain gauges ($mm$) across major Philippine river basins (Pampanga, Agno, Bicol, Cagayan, Pasig-Marikina, etc.).
-  - **Synoptic Weather Stations**: Surface observations, 3-hour precipitation, MSLP, and weather condition codes.
-  - **Tropical Cyclone Track Tracking**: Live cyclone coordinates, categorization (TD/TS/STS/TY/STY), and forecast track radii.
-- **Throttled Cron Ingestion (`/api/cron/ingest`)**: Automatic 15-minute deduplication throttling with override support (`?force=true` or `x-force-sync: true`), persisting consolidated telemetry snapshots to MongoDB `sync_meta` and active snapshots to `stations`.
+### 📱 Progressive Web App (PWA) & Offline Capabilities
+- **Installable Everywhere**: Installable as a standalone app on iOS (Safari Add to Home Screen), Android (Chrome install prompt), Windows, and macOS.
+- **Service Worker & Manifest**: Pre-configured `/sw.js` with background caching for critical app assets, vector map resources, icons, and dynamic runtime caches.
+- **Smart Install Prompt (`InstallPrompt.tsx`)**: Contextual banner prompting users to install the web app for fast one-tap access during weather emergencies.
 
-### 🧠 Dual-Signal Hydrological Flood Risk Engine
-- **Pluvial-Primary Urban Modeling**: Calibrated to Metro Manila urban hydrology where road surface flooding is overwhelmingly pluvial (rainfall exceeding storm drain capacity) rather than river overflow.
-- **Soil Saturation Index (SSI)**: Logistic decay model ($SSI = 1 - e^{-0.019 \times \text{Rain}_{24h}}$) tracking antecedent soil moisture.
-- **Surface Water Depth Calculation**: Accounts for urban runoff coefficients (0.8), base storm drain capacities (10–32 mm/hr), low-elevation ponding multipliers (1.5× for $\le 3.0\text{m}$), and 10-minute rainfall intensity spikes ($>5\text{mm}$).
-- **Fluvial Riverbank Surge**: Dynamically adds overflow depth only for roads within $\le 500\text{m}$ of river gauges at ALARM or CRITICAL stage.
-- **Machine Learning Inference**: ONNX Runtime integration loading trained XGBoost flood classification models with automatic fallback to heuristic scoring.
-- **UP Project NOAH Integration**: Return-period flood hazard classification (5-yr, 25-yr, 100-yr) coupled with road elevation to predict standing water accumulation.
-
-### 🚗 Turn-by-Turn Flood-Aware Route Solver
-- **OSRM Integration**: Calculates turn-by-turn directions between any two points in Metro Manila, discretizing routes into ~300m sub-segments for spatial risk analysis.
-- **Digital Elevation Model (DEM) Sampling**: Batch-queries Open-Meteo DEM API with local in-memory caching (24h TTL) and a calibrated Metro Manila topological gradient fallback model (UST low bowl 2.4m, G. Araneta 1.8m, Taft 2.8m, EDSA Shaw 22m, Katipunan 38m).
+### 🚗 Turn-by-Turn Flood-Aware Route Solver & Map Launchers
+- **OSRM Multi-Route Optimization**: Discretizes routes into ~300m sub-segments, evaluating flood depth, soil saturation, and road elevation to compare **Safest** vs. **Fastest** corridors.
 - **Vehicle Clearance & Passability Engine**: Real-time passability assessment tailored to vehicle types:
   - **Sedan / Hatchback**: 15 cm clearance (caution at 8 cm)
   - **SUV / Crossover**: 25 cm clearance (caution at 15 cm)
   - **Motorcycle / Scooter**: 12 cm clearance (caution at 6 cm, hydroplaning hazard)
   - **4x4 Pickup / Truck**: 40 cm clearance (caution at 25 cm)
+- **Start Travel Modal (`StartTravelModal.tsx`)**: Direct 1-click launch into native navigation apps:
+  - 🚗 **Google Maps**: Turn-by-turn driving or walking directions.
+  - 🚙 **Waze**: Direct GPS navigation with live traffic integration.
+  - 🍎 **Apple Maps**: Native iOS Apple Maps routing.
 - **Traffic Congestion & Delay Modeling**: Estimates flood-induced bottleneck delays and crawl speeds, categorizing traffic into Smooth, Moderate, Heavy, and Standstill Gridlock.
+- **Pedestrian Walkability & Health Hazards**: Evaluates footpath wading slowdowns, generates **DOH Leptospirosis infection warnings**, and flags **submerged open manhole / suction drain hazards**.
 
-### 🚶 Pedestrian Walkability & Health Hazard Modeling
-- **Footpath Inundation Scoring**: Evaluates walking corridors (0–100 score) and calculates physical wading slowdown delays.
-- **Health & Safety Alerts**: Generates crucial warnings including **DOH Leptospirosis infection risks** for contaminated floodwaters and **submerged open manhole / suction drain hazards**.
-- **Gear Recommendations**: Recommends appropriate gear based on depth (e.g. high rubber boots / *bota*, ground probing walking sticks, waterproof bags).
+### 🚨 Live Multi-Source Advisory Wall & Dynamic NLP Engine
+- **Multi-Source Scraping & Social Bulletins**: Background worker (`services/advisory-scraper`) monitoring government authorities (`@MMDA`, `@NDRRMC_OpCen`, `@dost_pagasa`) and accredited news outlets (`@gmanews`, `@ABSCBNNews`, `@News5PH`, `@inquirerdotnet`, `@rapplerdotcom`, `@manilabulletin`).
+- **Modular NLP & Classification Pipeline**:
+  - Distinguishes active roadway inundation from project proposals, commentary, or municipal announcements.
+  - Automatically rejects foreign disaster reports (e.g., Nepal, Spain, Bangladesh floods).
+  - Multi-location parsing (`locationPins`) extracts dozens of distinct geographic intersections from compound municipal summaries.
+  - Classifies depths into `GUTTER`, `KNEE`, `WAIST`, `CHEST / ROOF`, or `SUBSIDED`.
+- **Dynamic Geocoding & Hotspot Matching**:
+  - OpenStreetMap Nominatim geocoding with strict 1 req/sec rate-limiting, query sanitization, and caching.
+  - Offline fallback against an extensive dictionary of Philippine flood hotspots and highway intersections (`hotspots.ts`).
+- **Live Advisory Wall (`AdvisoryWallModal.tsx`) & Map Overlays**: Browse live advisories with attached photo media, passability badges, and click to fly directly to the map pin. Map pins auto-hide after 6 hours and expire after 24 hours in the database.
 
-### 🎨 Dark-Themed Interactive Map & Visuals
-- **Leaflet.js + CartoDB Dark Matter**: High-performance dark canvas with pulsating station indicators and responsive/collapsible mobile flood legends.
+### 📡 DOST-PAGASA Panahon Ingestion & Hydrology Engine
+- **Direct Panahon API Consumption**: Ingests telemetry nationwide from DOST-PAGASA Panahon (`https://www.panahon.gov.ph`):
+  - **Automated Weather Stations (AWS)**: 1-hour and 24-hour rainfall accumulation, temperature, heat index, relative humidity, pressure, and wind vectors.
+  - **River Basin Hydrology**: Real-time river water levels in meters ($m$) and catchment rain gauges ($mm$) across major Philippine river basins (Pampanga, Agno, Bicol, Cagayan, Pasig-Marikina, etc.).
+  - **Synoptic Weather Stations**: Surface observations, 3-hour precipitation, MSLP, and weather condition codes.
+  - **Tropical Cyclone Track Tracking**: Live cyclone coordinates, categorization (TD/TS/STS/TY/STY), and forecast track radii.
+- **Pluvial-Primary Urban Modeling**: Calibrated to Metro Manila urban hydrology where road surface flooding is primarily pluvial (drainage exceedance) rather than river overflow:
+  - **Soil Saturation Index (SSI)**: Logistic decay model ($SSI = 1 - e^{-0.019 \times \text{Rain}_{24h}}$).
+  - **Surface Water Depth Calculation**: Accounts for urban runoff coefficients (0.8), base storm drain capacities (10–32 mm/hr), low-elevation ponding multipliers (1.5× for $\le 3.0\text{m}$), and 10-minute rainfall intensity spikes.
+  - **Fluvial Riverbank Surge**: Dynamically adds overflow depth for roads within $\le 500\text{m}$ of river gauges at ALARM or CRITICAL stage.
+  - **Machine Learning Inference**: ONNX Runtime integration loading trained XGBoost flood classification models with automatic heuristic fallback.
+  - **UP Project NOAH Integration**: Return-period flood hazard classification (5-yr, 25-yr, 100-yr) coupled with DEM road elevation.
+
+### 🎨 Interactive Dark Map, Bottom Drawer & Social Share
+- **Leaflet.js + Protomaps PMTiles / CartoDB Dark Matter**: High-performance dark canvas with pulsating station radar indicators and responsive mobile flood legends.
 - **Continuous Route Overlay**: Displays base driving/walking polyline with high-contrast highlighted overlays on flooded segments.
-- **Philippine Highway Network (DPWH National Roads)**: Comprehensive monitoring of Primary & Secondary National Highways (e.g. **N1 / AH26** Maharlika Highway, **N2** MacArthur Highway, **N3** Jose Abad Santos Ave, **N4** Pres. Jose P. Laurel Hwy, **N11** C-5 Road, **N120** Roxas Blvd, **N130** Quirino/Araneta, **N170** España/Quezon/Commonwealth Ave, **N180** Taft/Rizal Ave, **N190** Gil Puyat Ave, **N201** Marcos Hwy, **N5** Iloilo-Capiz, **N8** Cebu North/South, **N9** Butuan-CDO-Iligan) with DPWH route shields and radar focus beacons.
-- **Autocomplete & Proximity Finder**: OpenStreetMap Nominatim place search coupled with Geohash bounding-box queries (`geofire-common`) and Haversine distance calculations.
-
-### 📸 High-Resolution Social Share Engine
-- **Instagram Story (9:16 Portrait)**: Generates 2× retina-ready images formatted with centered card overlays and safe zones for Instagram Stories.
-- **Standard Feed Card (Landscape)**: Formatted for Facebook, X (Twitter), and Discord feeds.
-- **One-Click Sharing**: Direct image copy to clipboard (`navigator.clipboard`), native Web Share API with attached files, and formatted plain-text alert generation.
-
-### 📊 Telemetry & Analytics
-- **MongoDB Streaming**: Real-time updates via `useLiveFloodStatus` hook with automatic fallback to live Panahon scraping.
-- **Firebase Analytics**: SSR-safe event telemetry tracking route searches, station selections, road inspections, share formats, and sync actions.
+- **Slide-up Monitored Roads Drawer (`BottomDrawer.tsx`)**: Searchable, sortable list of primary & secondary national highways (N1/AH26, N2, N3, N4, N11, N120, N130, N170, N180, N190, N201) with live flood risk statuses.
+- **High-Resolution Social Share Engine**: Generates 2× retina-ready images formatted for **Instagram Stories (9:16 Portrait)** and **Standard Feed Cards (16:9 Landscape)** via `html-to-image` with direct clipboard copy and native Web Share API support.
 
 ---
 
@@ -75,15 +80,17 @@ flowchart TD
         PANAHON_RIVER["DOST-PAGASA River Basins\n(/api/v1/riverbasin/waterlevel & raingauge)"]
         PANAHON_SYNOP["DOST-PAGASA Synoptic\n(/api/v1/synop?parameter=rain,weather)"]
         PANAHON_CYCLONE["DOST-PAGASA Cyclone Track\n(/api/v1/cyclone-track)"]
+        TWITTER_FEEDS["X / Twitter Advisory Feeds\n(@MMDA, @NDRRMC_OpCen, News Media)"]
         OSRM["OSRM Public Routing API\n(Driving & Walking Profiles)"]
         OPEN_METEO["Open-Meteo DEM API\n(Elevation in Meters ASL)"]
-        NOMINATIM["OpenStreetMap Nominatim\n(Geocoding Autocomplete)"]
+        NOMINATIM["OpenStreetMap Nominatim\n(Dynamic Geocoding)"]
     end
 
-    subgraph Ingestion_Persistence["Ingestion & Persistence"]
-        CRON["/api/cron/ingest Endpoint\n(15-Min Throttled Sync)"]
-        SCRAPER["Panahon Scraper & API Engine\n(panahon-scraper.ts)"]
-        MONGODB[("MongoDB Database\n• sync_meta (snapshot)\n• stations (2dsphere index)")]
+    subgraph Ingestion_Persistence["Ingestion & Persistence Layer"]
+        CRON_INGEST["/api/cron/ingest Route\n(15-Min Throttled Telemetry Sync)"]
+        CRON_ADVISORIES["/api/cron/advisories Route\n(Live Advisory Query & Expiration)"]
+        ADVISORY_WORKER["Advisory Scraper Worker\n(Playwright + Modular NLP Engine)"]
+        MONGODB[("MongoDB Database\n• sync_meta (telemetry snapshot)\n• stations (2dsphere index)\n• advisories (24h retention)")]
     end
 
     subgraph Risk_Navigation_Engine["Hydrological & Navigation Engine"]
@@ -91,41 +98,48 @@ flowchart TD
         HEURISTIC["Pluvial Heuristic Scorer\n(SSI + Drainage + Ponding)"]
         ONNX["ONNX XGBoost Model\n(ML Inference + Fallback)"]
         NOAH["NOAH Hazard Predictor\n(Return-Period Inundation)"]
-        ROUTE_SOLVER["Route Solver Engine\n(300m Segmentation)"]
+        ROUTE_SOLVER["Route Solver Engine\n(300m Sub-Segment Discretization)"]
         TRAFFIC_ENG["Traffic & Delay Model\n(Crawl Speed & Bottlenecks)"]
         WALK_ENG["Walkability & Health Model\n(Leptospirosis & Wading Delay)"]
         VEHICLE_ENG["Vehicle Clearance Engine\n(Sedan, SUV, Motorcycle, Truck)"]
+        NAV_LAUNCHER["Navigation Launcher\n(Google Maps, Waze, Apple Maps)"]
     end
 
-    subgraph Frontend_UI["Frontend Application (Next.js 16 + React 19)"]
-        HOOK["useLiveFloodStatus Hook\n(MongoDB Stream / Fallback)"]
-        MAP["Leaflet Dark Matter Map\n(Continuous Polyline + Radar Focus)"]
-        AUTOCOMPLETE["Location Autocomplete Search"]
-        STATION_TABLE["Telemetry & Road Tables\n(Multi-Column Sort)"]
-        SHARE_MODAL["Social Share Modal\n(9:16 IG Story & Feed Cards)"]
-        ANALYTICS["Firebase Analytics Telemetry"]
+    subgraph Web_App["Bahaba Web Application (Next.js 16 + React 19 + PWA)"]
+        HOOK_FLOOD["useLiveFloodStatus Hook"]
+        HOOK_ADVISORY["useLiveAdvisories Hook"]
+        MAP["Leaflet Map Canvas\n(PMTiles / Dark Matter)"]
+        ROUTE_PLANNER["Route Planner & Options"]
+        TRAVEL_MODAL["Start Travel Modal"]
+        ADVISORY_WALL["Live Advisory Wall Modal"]
+        BOTTOM_DRAWER["Bottom Drawer & Roads Table"]
+        SHARE_MODAL["Social Share Engine (9:16 / 16:9)"]
+        PWA_SERVICE["Service Worker & Install Banner"]
     end
 
     %% Ingestion flow
-    PANAHON_AWS -->|REST API (Token / Handshake)| SCRAPER
-    PANAHON_RIVER -->|REST API (Water Level & Rain)| SCRAPER
-    PANAHON_SYNOP -->|REST API (Synoptic)| SCRAPER
-    PANAHON_CYCLONE -->|REST API (Cyclone)| SCRAPER
-    CRON -->|Trigger Sync| SCRAPER
-    SCRAPER -->|Bulk Upsert| MONGODB
-    MONGODB -->|Snapshot & Geo Queries| HOOK
+    PANAHON_AWS -->|REST API| CRON_INGEST
+    PANAHON_RIVER -->|REST API| CRON_INGEST
+    PANAHON_SYNOP -->|REST API| CRON_INGEST
+    PANAHON_CYCLONE -->|REST API| CRON_INGEST
+    CRON_INGEST -->|Bulk Upsert| MONGODB
 
-    %% UI consumption
-    HOOK --> MAP
-    HOOK --> STATION_TABLE
-    NOMINATIM --> AUTOCOMPLETE
-    AUTOCOMPLETE --> ROUTE_SOLVER
+    TWITTER_FEEDS -->|Playwright Scrape| ADVISORY_WORKER
+    NOMINATIM -->|Dynamic Geocode| ADVISORY_WORKER
+    ADVISORY_WORKER -->|Upsert Advisories| MONGODB
+    CRON_ADVISORIES --> MONGODB
+
+    %% Data consumption
+    MONGODB --> HOOK_FLOOD
+    MONGODB --> HOOK_ADVISORY
 
     %% Routing flow
-    ROUTE_SOLVER -->|Fetch Polyline| OSRM
-    ROUTE_SOLVER -->|Sample Coordinates| ELEV_SVC
-    ELEV_SVC -->|Query Elevations| OPEN_METEO
-    HOOK -->|Live Telemetry| ROUTE_SOLVER
+    NOMINATIM --> ROUTE_PLANNER
+    ROUTE_PLANNER --> ROUTE_SOLVER
+    ROUTE_SOLVER -->|Polyline| OSRM
+    ROUTE_SOLVER -->|Elevations| ELEV_SVC
+    ELEV_SVC --> OPEN_METEO
+    HOOK_FLOOD --> ROUTE_SOLVER
     ROUTE_SOLVER --> HEURISTIC
     ROUTE_SOLVER --> ONNX
     ROUTE_SOLVER --> NOAH
@@ -133,11 +147,19 @@ flowchart TD
     ROUTE_SOLVER --> WALK_ENG
     ROUTE_SOLVER --> VEHICLE_ENG
 
-    %% Outputs to UI
-    ROUTE_SOLVER -->|Segmented Risk Polyline| MAP
+    %% UI Routing outputs
+    ROUTE_SOLVER --> MAP
+    ROUTE_SOLVER --> TRAVEL_MODAL
+    TRAVEL_MODAL --> NAV_LAUNCHER
+    NAV_LAUNCHER -->|Deep Links| External_Data
+
+    %% UI Connections
+    HOOK_FLOOD --> MAP
+    HOOK_FLOOD --> BOTTOM_DRAWER
+    HOOK_ADVISORY --> ADVISORY_WALL
+    HOOK_ADVISORY --> MAP
     MAP --> SHARE_MODAL
-    ROUTE_SOLVER --> SHARE_MODAL
-    HOOK --> ANALYTICS
+    PWA_SERVICE --> Web_App
 ```
 
 ---
@@ -146,22 +168,21 @@ flowchart TD
 
 | Layer | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Framework** | [Next.js 16.3 (App Router)](https://nextjs.org/) | Core full-stack framework with React Server Components and dynamic route handlers |
-| **UI Library** | [React 19.1](https://react.dev/) | Component architecture, hooks, and transitions |
+| **Framework** | [Next.js 16.3 (App Router)](https://nextjs.org/) | Full-stack framework with React Server Components and dynamic route handlers |
+| **UI Library** | [React 19.1](https://react.dev/) | Component architecture, hooks, and reactive transitions |
 | **Styling** | [Tailwind CSS 4.1](https://tailwindcss.com/) | Modern utility-first responsive styling with dark-mode aesthetic |
 | **Language** | [TypeScript 5.8](https://www.typescriptlang.org/) | End-to-end type safety |
+| **Database & Persistence** | [MongoDB 6.21](https://www.mongodb.com/) | Live telemetry snapshots, station collections (`2dsphere` indexes), and advisories |
+| **PWA & Offline** | [Service Worker & Manifest](https://web.dev/progressive-web-apps/) | Offline application shell, install banners, and cache storage |
 | **Interactive Map** | [Leaflet.js 1.9.4](https://leafletjs.com/) | Custom HTML markers, GeoJSON layers, pulsating beacons, and polyline overlays |
-| **Map Basemap** | [Philippines PMTiles (Protomaps)](https://protomaps.com/) | High-contrast dark theme hardware-accelerated vector basemap (offline & keyless) |
-| **Routing Engine** | [OSRM (Open Source Routing Machine)](http://project-osrm.org/) | Driving and walking route calculations between Point A and Point B |
+| **Map Basemap** | [Philippines PMTiles (Protomaps)](https://protomaps.com/) | Hardware-accelerated offline-capable vector basemaps |
+| **Routing Engine** | [OSRM (Open Source Routing Machine)](http://project-osrm.org/) | Turn-by-turn driving and walking route calculations |
 | **Elevation Service**| [Open-Meteo DEM API](https://open-meteo.com/en/docs/elevation-api) | Batch digital elevation sampling along polyline coordinates |
-| **Geocoding** | [OpenStreetMap Nominatim](https://nominatim.org/) | Debounced autocomplete place and landmark search |
-| **Database & Realtime**| [Firebase Cloud Firestore 10.13](https://firebase.google.com/docs/firestore) | Real-time station snapshots and historical telemetry time-series |
-| **Server Admin** | [Firebase Admin SDK 12.4](https://firebase.google.com/docs/admin/setup) | Server-side batch writes and geohash spatial queries |
-| **Spatial Indexing** | [Geofire Common 6.0](https://www.npmjs.com/package/geofire-common) | Geohash bounding-box calculations for station discovery |
+| **Geocoding** | [OpenStreetMap Nominatim](https://nominatim.org/) | Dynamic autocomplete place search and advisory location geocoding |
 | **Image Generation**| [html-to-image 1.11](https://www.npmjs.com/package/html-to-image) | Client-side 2× retina PNG generation for Instagram Stories & Feed Cards |
 | **ML Inference** | [ONNX Runtime](https://onnxruntime.ai/) | XGBoost model execution with heuristic fallback |
-| **HTTP & Scraping** | [Axios](https://axios-http.com/), [Cheerio](https://cheerio.js.org/) | Scrapes PAGASA FFWS and Panahon AWS endpoints |
-| **Testing** | [tsx](https://github.com/privatenumber/tsx) | Fast TypeScript test runner for engine verification |
+| **Scraping & NLP** | [Playwright](https://playwright.dev/), [Cheerio](https://cheerio.js.org/), [Axios](https://axios-http.com/) | Live advisory scraping, anti-detection browser automation, and Panahon API client |
+| **Testing** | [tsx](https://github.com/privatenumber/tsx) | Fast TypeScript test runner for engine, advisory, and spatial verification |
 
 ---
 
@@ -217,67 +238,85 @@ bahaba/
 ├── public/
 │   ├── models/
 │   │   └── xgboost_flood.onnx          # Pre-trained ONNX flood prediction model
-│   └── bahaba.jpg                  # Application UI preview
+│   ├── bahaba.jpeg                     # Application UI preview
+│   └── sw.js                           # Progressive Web App (PWA) Service Worker
 ├── src/
 │   ├── app/
 │   │   ├── api/
 │   │   │   └── cron/
+│   │   │       ├── advisories/
+│   │   │       │   └── route.ts        # Live social advisories API endpoint
 │   │   │       └── ingest/
-│   │   │           └── route.ts        # Telemetry scraping & Firestore persistence endpoint
+│   │   │           └── route.ts        # Panahon telemetry ingestion & MongoDB sync endpoint
 │   │   ├── globals.css                 # Global Tailwind CSS 4 directives & animations
-│   │   ├── layout.tsx                  # Root HTML layout & metadata
+│   │   ├── layout.tsx                  # Root HTML layout, metadata & PWA scripts
+│   │   ├── manifest.ts                 # Web App Manifest (PWA metadata & icons)
 │   │   └── page.tsx                    # Main interactive flood monitoring dashboard
 │   ├── components/
+│   │   ├── Advisory/
+│   │   │   └── AdvisoryWallModal.tsx   # Live Social Advisory Wall with photo cards
+│   │   ├── Drawer/
+│   │   │   ├── BottomDrawer.tsx        # Slide-up drawer for mobile & desktop
+│   │   │   └── MonitoredRoadsTable.tsx # National highway network table with search & sort
+│   │   ├── Layout/
+│   │   │   ├── MapHeaderControls.tsx   # Layer controls, sync button, and modal triggers
+│   │   │   └── MapLegend.tsx           # Floating responsive flood severity legend
 │   │   ├── Map/
-│   │   │   ├── NOAHPredictedRoadsLayer.tsx  # UP Project NOAH offline inundation vector layer
-│   │   │   ├── RoadFloodLayer.tsx           # Monitored road network overlay with radar pins
-│   │   │   └── RoadFloodMap.tsx             # Interactive Leaflet map & route polyline renderer
-│   │   ├── FirebaseAnalytics.tsx       # Browser-side Firebase Analytics initializer
-│   │   ├── FloodMap.tsx                # Base flood station map component
+│   │   │   ├── FloodHeatmapLayer.tsx   # Inundation density heatmap layer
+│   │   │   ├── LiveAdvisoryOverlayLayer.tsx # Social advisory pin cluster & popup cards
+│   │   │   ├── NOAHFloodHazardLayer.tsx# UP Project NOAH flood hazard zone layer
+│   │   │   ├── PMTilesFloodRoadsLayer.tsx # Vector tile road flood layer
+│   │   │   └── RoadFloodMap.tsx        # Base Leaflet map & route polyline renderer
+│   │   ├── Navigation/
+│   │   │   ├── RouteOptionCard.tsx     # Route summary card with flood clearance metrics
+│   │   │   ├── RoutePlanner.tsx        # Origin/Destination search & route chooser
+│   │   │   └── StartTravelModal.tsx    # 1-click external navigation launcher (Google/Waze/Apple)
+│   │   ├── AboutModal.tsx              # Project mission & data attribution modal
+│   │   ├── DonationModal.tsx           # Community support & donation modal
+│   │   ├── InstallPrompt.tsx           # PWA install banner
 │   │   ├── LocationAutocomplete.tsx    # Debounced OSM Nominatim search input
-│   │   ├── NearestStationFinder.tsx    # Proximity geo-search widget
+│   │   ├── RegisterSW.tsx              # Browser Service Worker registration component
 │   │   ├── ShareModal.tsx              # Instagram Story (9:16) & Feed Card export modal
-│   │   └── StationTable.tsx            # Multi-column sortable telemetry & risk table
+│   │   └── TelemetrySidePanel.tsx      # Live nationwide hydrological metrics panel
 │   ├── hooks/
-│   │   └── useLiveFloodStatus.ts       # Firestore onSnapshot listener with offline fallback
+│   │   ├── useLiveAdvisories.ts        # Real-time advisory polling & cache hook
+│   │   └── useLiveFloodStatus.ts       # MongoDB telemetry polling & live stream hook
 │   ├── lib/
-│   │   ├── data/
-│   │   │   └── noah-roads.json         # GeoJSON dataset of Philippine National Highways & urban flood corridors
+│   │   ├── advisories/
+│   │   │   ├── geocoding.ts            # OSM Nominatim client with 1s rate limiter & cache
+│   │   │   ├── hotspots.ts             # Curated dictionary of Philippine flood hotspots
+│   │   │   ├── parser.ts               # Modular NLP advisory parser & multi-pin extractor
+│   │   │   └── scraper.ts              # Cheerio-based timeline fallback scraper
 │   │   ├── engine/
 │   │   │   ├── __tests__/              # Automated test suites
 │   │   │   │   ├── flood-engine.test.ts
+│   │   │   │   ├── live-flood-grid.test.ts
 │   │   │   │   ├── noah-predictor.test.ts
 │   │   │   │   ├── road-risk.test.ts
 │   │   │   │   └── route-solver.test.ts
 │   │   │   ├── floodPredictor.ts       # UP NOAH water depth & hazard category logic
 │   │   │   ├── heuristics.ts           # Pluvial/fluvial deterministic risk scoring
 │   │   │   ├── inference.ts            # ONNX Runtime model loader & fallback runner
+│   │   │   ├── liveFloodGrid.ts        # Spatial grid risk evaluator
 │   │   │   ├── roadRisk.ts             # Spatial centroid matcher & road risk evaluator
 │   │   │   └── routeSolver.ts          # OSRM route segmentation, traffic & walkability engine
-│   │   ├── firebase/
-│   │   │   ├── __tests__/
-│   │   │   │   └── geo.test.ts         # Coordinates & Geohash tests
-│   │   │   ├── admin.ts                # Firebase Admin SDK initialization
-│   │   │   ├── analytics.ts            # Custom Firebase Analytics event trackers
-│   │   │   ├── client.ts               # Firebase Client SDK initialization
-│   │   │   ├── geo-utils.ts            # Geohash and Haversine distance math
-│   │   │   ├── geo.ts                  # Server-side bounding-box station queries
-│   │   │   └── station-coords.ts       # Authoritative PAGASA station coordinates & slugifier
 │   │   ├── geo/
 │   │   │   ├── elevation.ts            # Open-Meteo DEM batch client with local gradient fallback
-│   │   │   └── getRoadsInBBox.ts       # Spatial bounding-box filter for road segments
-│   │   ├── leaflet-patch.ts            # Leaflet bounds & NaN coordinate guard patches
-│   │   ├── panahon-scraper.ts          # DOST-PAGASA Panahon AWS scraper & session manager
-│   │   └── scraper.ts                  # PAGASA FFWS AJAX scraper & telemetry merger
+│   │   │   └── navigationLauncher.ts   # Deep links for Google Maps, Waze, and Apple Maps
+│   │   ├── mongodb/
+│   │   │   ├── client.ts               # MongoDB singleton client with DNS resilience
+│   │   │   └── geo.ts                  # Geospatial queries & 2dsphere indexing helpers
+│   │   ├── panahon-scraper.ts          # DOST-PAGASA Panahon AWS & river scraper
+│   │   └── pmtiles/
+│   │       └── cachedSource.ts         # In-memory vector tile cache
 │   └── types/
-│       ├── firestore.ts                # Firestore document schemas & LiveStation types
+│       ├── advisory.ts                 # Advisory document, pin, and passability schemas
 │       ├── flood-engine.ts             # Risk levels, vehicle clearances & feature vectors
-│       ├── index.ts                    # Root barrel exports
-│       ├── location.ts                 # Location search result types
+│       ├── location.ts                 # Geocoding search result interfaces
 │       └── telemetry.ts                # Rainfall & water level reading interfaces
-├── firestore.rules                     # Cloud Firestore security rules
-├── firestore.indexes.json              # Firestore composite index definitions
-├── package.json                        # Project scripts & dependencies
+├── services/
+│   └── advisory-scraper/               # Standalone Playwright X/Twitter Scraping Worker
+├── package.json                        # Project dependencies & test scripts
 └── tsconfig.json                       # TypeScript compiler configuration
 ```
 
@@ -286,9 +325,8 @@ bahaba/
 ## ⚡ Quickstart & Local Setup
 
 ### Prerequisites
-- **Node.js**: v18.x or higher
-- **npm** or **bun**: v9.x / v1.1 or higher
-- **Firebase Account**: (Optional — application automatically falls back to direct client-side scraping when Firebase credentials are omitted).
+- **Node.js**: v18.x or higher, or **Bun** v1.1+
+- **MongoDB**: Local MongoDB instance (`mongodb://localhost:27017`) or [MongoDB Atlas](https://www.mongodb.com/atlas) cluster.
 
 ### 1. Clone & Install Dependencies
 
@@ -306,21 +344,20 @@ Copy the example configuration file:
 cp .env.local.example .env.local
 ```
 
-Populate `.env.local` with your Firebase project credentials:
+Populate `.env.local` with your MongoDB connection string and optional configurations:
 
 ```env
-# Firebase Client SDK (Public)
-NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
-NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-XXXXXXXXXX
+# MongoDB Connection (Required)
+MONGODB_URI=mongodb://localhost:27017/bahaba
+# Or MongoDB Atlas: mongodb+srv://<user>:<password>@cluster.mongodb.net/bahaba?retryWrites=true&w=majority
+MONGODB_DB=bahaba
 
-# Firebase Admin SDK (Server-Side)
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@your_project.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----\n"
+# Optional: CARTO Basemap API Key (for high-res dark matter basemap fallback)
+# NEXT_PUBLIC_CARTO_API_KEY=your_carto_key
+
+# Optional: Firebase (for analytics telemetry if configured)
+# NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
+# NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 ```
 
 ### 3. Run Development Server
@@ -333,15 +370,15 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### 4. Trigger Ingestion Pipeline
 
-To test telemetry scraping and sync data to Firestore:
+To test telemetry scraping and sync data to MongoDB:
 - Click the **Sync Telemetry** button in the dashboard navigation bar, or
-- Trigger the ingestion endpoint directly via `curl`:
+- Trigger the ingestion endpoint directly:
 
 ```bash
-# Standard sync (respects 30-minute throttling window)
+# Standard sync (respects 15-minute throttling window)
 curl http://localhost:3000/api/cron/ingest
 
-# Forced sync (bypasses 30-minute interval check)
+# Forced sync (bypasses 15-minute interval check)
 curl http://localhost:3000/api/cron/ingest?force=true
 ```
 
@@ -349,7 +386,7 @@ curl http://localhost:3000/api/cron/ingest?force=true
 
 ## 🧪 Automated Testing
 
-Bahaba includes comprehensive unit tests verifying the hydrological formula, spatial matching, elevation sampling, vehicle clearance, traffic delay, and walkability logic:
+Bahaba includes comprehensive unit tests verifying the hydrological formula, spatial matching, elevation sampling, vehicle clearance, traffic delay, walkability logic, dynamic geocoding, and multi-location advisory NLP:
 
 ```bash
 # 1. Run Core Hydro-Engine & Edge Case Tests
@@ -364,28 +401,34 @@ npm run test:noah
 # 4. Run Route Solver, Traffic, Clearance & Walkability Tests
 npm run test:route-solver
 
-# 5. Run Station Coordinates & Geohash Math Tests
-npx tsx src/lib/firebase/__tests__/geo.test.ts
+# 5. Run Live Flood Grid Interpolation Tests
+npm run test:grid
+
+# 6. Run Modular Flood Engine Tests
+npm run test:modular-engine
+
+# 7. Run Advisory Visibility, Dynamic Multi-Pin Parser, and NLP Tests
+npm run test:advisories
 ```
 
 ---
 
 ## 🌐 DOST-PAGASA Panahon API Reference
 
-Bahaba is fully migrated to **DOST-PAGASA Panahon (`https://www.panahon.gov.ph`)**. All endpoints support querying with `?token=<TOKEN>` or via authenticated session handshakes.
+Bahaba is fully integrated with **DOST-PAGASA Panahon (`https://www.panahon.gov.ph`)**. All endpoints support querying with `?token=<TOKEN>` or via authenticated session handshakes.
 
 ### 1. Automated Weather Stations (AWS)
 Base Endpoint: `https://www.panahon.gov.ph/api/v1/aws`
 
 | Parameter | Unit | Description | Sample Request URL | Sample Response |
 | :--- | :--- | :--- | :--- | :--- |
-| `rainfall` | `mm` | 1-hour & 24-hour accumulated rainfall | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=rainfall` | [`aws/rainfall.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/rainfall.json) |
-| `temperature` | `°C` | Real-time ambient temperature | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=temperature` | [`aws/temperature.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/temperature.json) |
-| `heat-index` | `°C` | Apparent calculated heat index | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=heat-index` | [`aws/heat-index.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/heat-index.json) |
-| `humidity` | `%` | Relative atmospheric humidity | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=humidity` | [`aws/humidity.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/humidity.json) |
-| `pressure` | `hPa` | Atmospheric station pressure | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=pressure` | [`aws/pressure.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/pressure.json) |
-| `wind-speed` | `m/s` | Current wind speed velocity | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=wind-speed` | [`aws/wind-speed.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/wind-speed.json) |
-| `wind-direction` | `°` | Wind compass direction | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=wind-direction` | [`aws/wind-direction.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/aws/wind-direction.json) |
+| `rainfall` | `mm` | 1-hour & 24-hour accumulated rainfall | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=rainfall` | [`aws/rainfall.json`](data/samples/panahon/aws/rainfall.json) |
+| `temperature` | `°C` | Real-time ambient temperature | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=temperature` | [`aws/temperature.json`](data/samples/panahon/aws/temperature.json) |
+| `heat-index` | `°C` | Apparent calculated heat index | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=heat-index` | [`aws/heat-index.json`](data/samples/panahon/aws/heat-index.json) |
+| `humidity` | `%` | Relative atmospheric humidity | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=humidity` | [`aws/humidity.json`](data/samples/panahon/aws/humidity.json) |
+| `pressure` | `hPa` | Atmospheric station pressure | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=pressure` | [`aws/pressure.json`](data/samples/panahon/aws/pressure.json) |
+| `wind-speed` | `m/s` | Current wind speed velocity | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=wind-speed` | [`aws/wind-speed.json`](data/samples/panahon/aws/wind-speed.json) |
+| `wind-direction` | `°` | Wind compass direction | `https://www.panahon.gov.ph/api/v1/aws?token=<API_TOKEN>&parameter=wind-direction` | [`aws/wind-direction.json`](data/samples/panahon/aws/wind-direction.json) |
 
 ### 2. River Basin Hydrological Telemetry
 Endpoints:
@@ -394,79 +437,27 @@ Endpoints:
 
 | Endpoint | Parameter | Unit | Description | Sample Request URL | Sample Response |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/api/v1/riverbasin/waterlevel` | `waterlevel` | `m` | Real-time river water stage | `https://www.panahon.gov.ph/api/v1/riverbasin/waterlevel?token=<API_TOKEN>&parameter=waterlevel` | [`riverbasin/waterlevel.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/riverbasin/waterlevel.json) |
-| `/api/v1/riverbasin/raingauge` | `raingauge` | `mm` | River basin rain gauge | `https://www.panahon.gov.ph/api/v1/riverbasin/raingauge?token=<API_TOKEN>&parameter=raingauge` | [`riverbasin/raingauge.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/riverbasin/raingauge.json) |
+| `/api/v1/riverbasin/waterlevel` | `waterlevel` | `m` | Real-time river water stage | `https://www.panahon.gov.ph/api/v1/riverbasin/waterlevel?token=<API_TOKEN>&parameter=waterlevel` | [`riverbasin/waterlevel.json`](data/samples/panahon/riverbasin/waterlevel.json) |
+| `/api/v1/riverbasin/raingauge` | `raingauge` | `mm` | River basin rain gauge | `https://www.panahon.gov.ph/api/v1/riverbasin/raingauge?token=<API_TOKEN>&parameter=raingauge` | [`riverbasin/raingauge.json`](data/samples/panahon/riverbasin/raingauge.json) |
 
 ### 3. Synoptic Weather Stations
 Base Endpoint: `https://www.panahon.gov.ph/api/v1/synop`
 
 | Parameter | Unit | Description | Sample Request URL | Sample Response |
 | :--- | :--- | :--- | :--- | :--- |
-| `observed_weather` | Text/JSON | Synoptic weather conditions & icon | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=observed_weather` | [`synop/observed_weather.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/observed_weather.json) |
-| `rain` | `mm` | 3-hour precipitation accumulation | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=rain` | [`synop/rain.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/rain.json) |
-| `currentTemp` | `°C` | Surface station temperature | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=currentTemp` | [`synop/currentTemp.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/currentTemp.json) |
-| `mslp` | `hPa` | Mean Sea Level Pressure | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=mslp` | [`synop/mslp.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/mslp.json) |
-| `windSpeed` | `m/s` | Synoptic wind speed | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=windSpeed` | [`synop/windSpeed.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/windSpeed.json) |
-| `windDirection` | Cardinal | Synoptic wind compass heading (e.g. `ENE`) | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=windDirection` | [`synop/windDirection.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/synop/windDirection.json) |
+| `observed_weather` | Text/JSON | Synoptic weather conditions & icon | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=observed_weather` | [`synop/observed_weather.json`](data/samples/panahon/synop/observed_weather.json) |
+| `rain` | `mm` | 3-hour precipitation accumulation | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=rain` | [`synop/rain.json`](data/samples/panahon/synop/rain.json) |
+| `currentTemp` | `°C` | Surface station temperature | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=currentTemp` | [`synop/currentTemp.json`](data/samples/panahon/synop/currentTemp.json) |
+| `mslp` | `hPa` | Mean Sea Level Pressure | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=mslp` | [`synop/mslp.json`](data/samples/panahon/synop/mslp.json) |
+| `windSpeed` | `m/s` | Synoptic wind speed | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=windSpeed` | [`synop/windSpeed.json`](data/samples/panahon/synop/windSpeed.json) |
+| `windDirection` | Cardinal | Synoptic wind compass heading | `https://www.panahon.gov.ph/api/v1/synop?token=<API_TOKEN>&parameter=windDirection` | [`synop/windDirection.json`](data/samples/panahon/synop/windDirection.json) |
 
 ### 4. Tropical Cyclone Tracking
 Endpoint: `https://www.panahon.gov.ph/api/v1/cyclone-track`
 
 | Endpoint | Description | Sample Request URL | Sample Response |
 | :--- | :--- | :--- | :--- |
-| `/api/v1/cyclone-track` | Tropical cyclone coordinates, category (TD, TS, STS, TY, STY), and radius | `https://www.panahon.gov.ph/api/v1/cyclone-track?token=<API_TOKEN>` | [`cyclone/cyclone-track.json`](file:///d:/Hudas/Documents/Repository/bahaba/data/samples/panahon/cyclone/cyclone-track.json) |
-
----
-
-## 📡 Ingestion API Reference
-
-### `GET /api/cron/ingest`
-Ingests real-time telemetry from DOST-PAGASA Panahon (AWS, River Basins, Synoptic), normalizes rainfall and water level readings, calculates composite risk, and commits batch updates to MongoDB.
-
-#### Query Parameters / Headers
-- `?force=true` or Header `x-force-sync: true`: Forces ingestion write even if the previous sync was completed within the last 15 minutes.
-
-#### Response Headers
-- `X-Scrape-Duration-Ms`: Ingestion pipeline execution time in milliseconds.
-- `X-Rainfall-Rows`: Count of normalized rainfall rows.
-- `X-WaterLevel-Rows`: Count of normalized water-level rows.
-- `X-DB-Persisted-Stations`: Number of stations written to MongoDB.
-- `X-Cache`: `HIT-MEMORY`, `HIT-MONGODB-SNAPSHOT`, or `MISS-SCRAPED`.
-
-#### Response Body Example
-```json
-{
-  "success": true,
-  "scrapedAt": "2026-08-21T03:30:00.000Z",
-  "stations": [
-    {
-      "stationName": "Science Garden, Quezon City",
-      "latitude": 14.645101,
-      "longitude": 121.044258,
-      "rainfall": {
-        "stationName": "Science Garden, Quezon City",
-        "rain10min": 0,
-        "rain1hr": 0,
-        "rain3hr": 0,
-        "rain24hr": 0
-      },
-      "waterLevel": null,
-      "waterRiskLevel": "NORMAL",
-      "rainRiskLevel": "NORMAL",
-      "riskLevel": "NORMAL",
-      "temperatureC": 30.4,
-      "heatIndexC": 37.5,
-      "humidityPercent": 73,
-      "observedAt": "2026-08-21T03:00:00.000Z"
-    }
-  ],
-  "meta": {
-    "rainfallRowCount": 156,
-    "waterLevelRowCount": 78,
-    "durationMs": 1120
-  }
-}
-```
+| `/api/v1/cyclone-track` | Tropical cyclone coordinates, category (TD, TS, STS, TY, STY), and radius | `https://www.panahon.gov.ph/api/v1/cyclone-track?token=<API_TOKEN>` | [`cyclone/cyclone-track.json`](data/samples/panahon/cyclone/cyclone-track.json) |
 
 ---
 
@@ -476,7 +467,7 @@ Contributions are welcome! To contribute:
 
 1. Fork the repository.
 2. Create your feature branch (`git checkout -b feature/amazing-feature`).
-3. Ensure all tests pass (`npm run test:engine && npm run test:road-risk && npm run test:noah && npm run test:route-solver`).
+3. Ensure all tests pass (`npm run test:engine; npm run test:advisories`).
 4. Commit your changes (`git commit -m 'Add amazing feature'`).
 5. Push to your branch (`git push origin feature/amazing-feature`).
 6. Open a Pull Request.
