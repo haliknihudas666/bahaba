@@ -87,8 +87,8 @@ export default function InstallPrompt() {
   return (
     <>
       {/* Floating Install Banner */}
-      <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-sm z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
-        <div className="bg-slate-900/95 border border-cyan-500/30 backdrop-blur-xl p-4 rounded-2xl shadow-2xl shadow-cyan-950/40 text-slate-100 flex flex-col gap-3">
+      <div className="fixed bottom-4 left-3 right-3 sm:bottom-5 sm:left-4 sm:right-auto sm:max-w-sm z-[900] animate-in fade-in slide-in-from-bottom-5 duration-300">
+        <div className="bg-slate-900/95 border border-cyan-500/40 backdrop-blur-2xl p-4 rounded-2xl shadow-2xl shadow-black/90 ring-1 ring-white/10 text-slate-100 flex flex-col gap-3">
           <div className="flex items-center gap-3">
             <div className="relative w-11 h-11 rounded-xl overflow-hidden bg-slate-950 border border-slate-700/60 shrink-0">
               <Image
@@ -142,8 +142,8 @@ export default function InstallPrompt() {
 
       {/* iOS Instructions Modal */}
       {showIOSGuide && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-slate-100 flex flex-col gap-4">
+        <div className="fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-md flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 max-w-sm w-full shadow-2xl shadow-black text-slate-100 flex flex-col gap-4">
             <div className="flex justify-between items-center">
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 Install on iPhone / iPad
