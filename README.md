@@ -57,14 +57,14 @@
   - **Synoptic Weather Stations**: Surface observations, 3-hour precipitation, MSLP, and weather condition codes.
   - **Tropical Cyclone Track Tracking**: Live cyclone coordinates, categorization (TD/TS/STS/TY/STY), and forecast track radii.
 - **Pluvial-Primary Urban Modeling**: Calibrated to Metro Manila urban hydrology where road surface flooding is primarily pluvial (drainage exceedance) rather than river overflow:
-  - **Soil Saturation Index (SSI)**: Logistic decay model ($SSI = 1 - e^{-0.019 \times \text{Rain}_{24h}}$).
-  - **Surface Water Depth Calculation**: Accounts for urban runoff coefficients (0.8), base storm drain capacities (10–32 mm/hr), low-elevation ponding multipliers (1.5× for $\le 3.0\text{m}$), and 10-minute rainfall intensity spikes.
-  - **Fluvial Riverbank Surge**: Dynamically adds overflow depth for roads within $\le 500\text{m}$ of river gauges at ALARM or CRITICAL stage.
-  - **Machine Learning Inference**: ONNX Runtime integration loading trained XGBoost flood classification models with automatic heuristic fallback.
+  - **Soil Saturation Index (SSI)**: Logistic decay model ($\text{SSI} = 1 - e^{-0.019 \times \text{Rain}_{24\text{h}}}$).
+  - **Surface Water Depth Calculation**: Accounts for urban runoff coefficients (0.8), base storm drain capacities (10–32 mm/hr), low-elevation ponding multipliers (1.5× for $\le 3.0\text{ m}$), and 10-minute rainfall intensity spikes.
+  - **Fluvial Riverbank Surge**: Dynamically adds overflow depth for roads within $\le 500\text{ m}$ of river gauges at ALARM or CRITICAL stage.
+  - **Deterministic Hydrological Heuristics**: Multi-parameter deterministic scoring engine calculating SSI, drainage exceedance, and burst rainfall.
   - **UP Project NOAH Integration**: Return-period flood hazard classification (5-yr, 25-yr, 100-yr) coupled with DEM road elevation.
 
 ### 🎨 Interactive Dark Map, Bottom Drawer & Social Share
-- **Leaflet.js + Protomaps PMTiles / CartoDB Dark Matter**: High-performance dark canvas with pulsating station radar indicators and responsive mobile flood legends.
+- **Leaflet.js + Protomaps Vector PMTiles**: High-performance dark canvas with pulsating station radar indicators and responsive mobile flood legends.
 - **Continuous Route Overlay**: Displays base driving/walking polyline with high-contrast highlighted overlays on flooded segments.
 - **Slide-up Monitored Roads Drawer (`BottomDrawer.tsx`)**: Searchable, sortable list of primary & secondary national highways (N1/AH26, N2, N3, N4, N11, N120, N130, N170, N180, N190, N201) with live flood risk statuses.
 - **High-Resolution Social Share Engine**: Generates 2× retina-ready images formatted for **Instagram Stories (9:16 Portrait)** and **Standard Feed Cards (16:9 Landscape)** via `html-to-image` with direct clipboard copy and native Web Share API support.
@@ -96,7 +96,7 @@ flowchart TD
     subgraph Risk_Navigation_Engine["Hydrological & Navigation Engine"]
         ELEV_SVC["Elevation Service\n(Open-Meteo + Metro Manila DEM)"]
         HEURISTIC["Pluvial Heuristic Scorer\n(SSI + Drainage + Ponding)"]
-        ONNX["ONNX XGBoost Model\n(ML Inference + Fallback)"]
+        HYDRO_ENG["Hydrological Scorer\n(Pluvial + River Surge)"]
         NOAH["NOAH Hazard Predictor\n(Return-Period Inundation)"]
         ROUTE_SOLVER["Route Solver Engine\n(300m Sub-Segment Discretization)"]
         TRAFFIC_ENG["Traffic & Delay Model\n(Crawl Speed & Bottlenecks)"]
@@ -108,7 +108,7 @@ flowchart TD
     subgraph Web_App["Bahaba Web Application (Next.js 16 + React 19 + PWA)"]
         HOOK_FLOOD["useLiveFloodStatus Hook"]
         HOOK_ADVISORY["useLiveAdvisories Hook"]
-        MAP["Leaflet Map Canvas\n(PMTiles / Dark Matter)"]
+        MAP["Leaflet Map Canvas\n(Protomaps Vector PMTiles)"]
         ROUTE_PLANNER["Route Planner & Options"]
         TRAVEL_MODAL["Start Travel Modal"]
         ADVISORY_WALL["Live Advisory Wall Modal"]
@@ -141,7 +141,7 @@ flowchart TD
     ELEV_SVC --> OPEN_METEO
     HOOK_FLOOD --> ROUTE_SOLVER
     ROUTE_SOLVER --> HEURISTIC
-    ROUTE_SOLVER --> ONNX
+    ROUTE_SOLVER --> HYDRO_ENG
     ROUTE_SOLVER --> NOAH
     ROUTE_SOLVER --> TRAFFIC_ENG
     ROUTE_SOLVER --> WALK_ENG
@@ -180,7 +180,7 @@ flowchart TD
 | **Elevation Service**| [Open-Meteo DEM API](https://open-meteo.com/en/docs/elevation-api) | Batch digital elevation sampling along polyline coordinates |
 | **Geocoding** | [OpenStreetMap Nominatim](https://nominatim.org/) | Dynamic autocomplete place search and advisory location geocoding |
 | **Image Generation**| [html-to-image 1.11](https://www.npmjs.com/package/html-to-image) | Client-side 2× retina PNG generation for Instagram Stories & Feed Cards |
-| **ML Inference** | [ONNX Runtime](https://onnxruntime.ai/) | XGBoost model execution with heuristic fallback |
+| **Hydrology Engine**| TypeScript Heuristic Engine | Pluvial excess, soil saturation (SSI), river surge, and Project NOAH return periods |
 | **Scraping & NLP** | [Playwright](https://playwright.dev/), [Cheerio](https://cheerio.js.org/), [Axios](https://axios-http.com/) | Live advisory scraping, anti-detection browser automation, and Panahon API client |
 | **Testing** | [tsx](https://github.com/privatenumber/tsx) | Fast TypeScript test runner for engine, advisory, and spatial verification |
 
@@ -264,9 +264,7 @@ bahaba/
 │           ├── synop/                  # Synoptic surface weather observations & 3h rain
 │           └── README.md               # Panahon data dictionary & parameter reference
 ├── public/
-│   ├── models/
-│   │   └── xgboost_flood.onnx          # Pre-trained ONNX flood prediction model
-│   ├── bahaba.jpeg                     # Application UI preview
+│   ├── manifest.json                   # Web App Manifest
 │   └── sw.js                           # Progressive Web App (PWA) Service Worker
 ├── src/
 │   ├── app/
@@ -388,13 +386,6 @@ Populate `.env.local` with your MongoDB connection string and optional configura
 MONGODB_URI=mongodb://localhost:27017/bahaba
 # Or MongoDB Atlas: mongodb+srv://<user>:<password>@cluster.mongodb.net/bahaba?retryWrites=true&w=majority
 MONGODB_DB=bahaba
-
-# Optional: CARTO Basemap API Key (for high-res dark matter basemap fallback)
-# NEXT_PUBLIC_CARTO_API_KEY=your_carto_key
-
-# Optional: Firebase (for analytics telemetry if configured)
-# NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
-# NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 ```
 
 ### 3. Run Development Server
