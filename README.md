@@ -190,22 +190,37 @@ flowchart TD
 
 ### 1. Soil Saturation Index (SSI)
 Measures antecedent soil moisture using an exponential logistic decay formula calibrated so that 100 mm of 24-hour rainfall yields ~0.85 saturation:
-$$SSI = 1 - e^{-0.019 \times \text{Rain}_{24h}}$$
+
+$$
+\text{SSI} = 1 - e^{-0.019 \times \text{Rain}_{24\text{h}}}
+$$
 
 ### 2. Pluvial Surface Water Depth
 Pluvial flooding is calculated from net rainfall excess exceeding effective drainage:
-$$\text{Drainage}_{\text{eff}} = \text{Drainage}_{\text{base}} \times (1 - 0.8 \times SSI)$$
-$$\text{Excess}_{\text{net}} = \max\left(0, \text{Rain}_{1h} \times 0.8 - \text{Drainage}_{\text{eff}}\right)$$
-$$\text{Depth}_{\text{pluvial}} = \text{Excess}_{\text{net}} \times 0.15 \times \text{Multiplier}_{\text{pond}} + \text{Bonus}_{\text{burst}}$$
+
+$$
+\text{Drainage}_{\text{eff}} = \text{Drainage}_{\text{base}} \times (1 - 0.8 \times \text{SSI})
+$$
+
+$$
+\text{Excess}_{\text{net}} = \max\left(0, \text{Rain}_{1\text{h}} \times 0.8 - \text{Drainage}_{\text{eff}}\right)
+$$
+
+$$
+\text{Depth}_{\text{pluvial}} = \text{Excess}_{\text{net}} \times 0.15 \times \text{Multiplier}_{\text{pond}} + \text{Bonus}_{\text{burst}}
+$$
 
 Where:
 - $\text{Drainage}_{\text{base}} = 10\text{ mm/hr}$ (adjusted up to $32\text{ mm/hr}$ for elevated corridors)
-- $\text{Multiplier}_{\text{pond}} = 1.5$ if road elevation $\le 3.0\text{m ASL}$, else $1.0$
-- $\text{Bonus}_{\text{burst}} = (\text{Rain}_{10m} - 5) \times 0.2\text{ cm}$ if $\text{Rain}_{10m} > 5\text{ mm}$
+- $\text{Multiplier}_{\text{pond}} = 1.5$ if road elevation $\le 3.0\text{ m ASL}$, else $1.0$
+- $\text{Bonus}_{\text{burst}} = (\text{Rain}_{10\text{m}} - 5) \times 0.2\text{ cm}$ if $\text{Rain}_{10\text{m}} > 5\text{ mm}$
 
 ### 3. Fluvial Riverbank Surge
-Added only when the road is within $500\text{m}$ of a river station at ALARM or CRITICAL level:
-$$\text{Depth}_{\text{total}} = \text{Depth}_{\text{pluvial}} + \text{Bonus}_{\text{fluvial}} + \max(0, \Delta\text{WaterLevel}_{1h}) \times 30$$
+Added only when the road is within $500\text{ m}$ of a river station at ALARM or CRITICAL level:
+
+$$
+\text{Depth}_{\text{total}} = \text{Depth}_{\text{pluvial}} + \text{Bonus}_{\text{fluvial}} + \max(0, \Delta\text{WaterLevel}_{1\text{h}}) \times 30
+$$
 
 ### 4. Traffic Congestion & Delay Model
 Flood-induced crawl speeds on sub-segments calculate total trip delay:
@@ -214,9 +229,14 @@ Flood-induced crawl speeds on sub-segments calculate total trip delay:
 - **$6 - 15\text{ cm}$ (Gutter Deep)**: 2.2× delay (~15 km/h cautious speed)
 
 ### 5. Pedestrian Walkability Score
-$$\text{Score}_{\text{walk}} = \max\left(5, 100 - \text{Depth}_{\text{cm}} \times 2.2\right)$$
+
+$$
+\text{Score}_{\text{walk}} = \max\left(5, 100 - \text{Depth}_{\text{cm}} \times 2.2\right)
+$$
+
 - If $\text{Depth} > 25\text{ cm}$: Marked as **IMPASSABLE / DO NOT WALK** (risk of open manhole suction and deep water hazards).
 - If $\text{Depth} \ge 10\text{ cm}$: Triggers **Leptospirosis Health Alert**.
+
 
 ---
 
@@ -235,6 +255,14 @@ $$\text{Score}_{\text{walk}} = \max\left(5, 100 - \text{Depth}_{\text{cm}} \time
 
 ```
 bahaba/
+├── data/
+│   └── samples/
+│       └── panahon/                    # Sanitized DOST-PAGASA Panahon API sample payloads
+│           ├── aws/                    # AWS rainfall, temp, heat-index, humidity, pressure, wind
+│           ├── cyclone/                # Tropical cyclone tracks & forecast radii
+│           ├── riverbasin/             # River stage water levels & catchment rain gauges
+│           ├── synop/                  # Synoptic surface weather observations & 3h rain
+│           └── README.md               # Panahon data dictionary & parameter reference
 ├── public/
 │   ├── models/
 │   │   └── xgboost_flood.onnx          # Pre-trained ONNX flood prediction model
@@ -243,11 +271,20 @@ bahaba/
 ├── src/
 │   ├── app/
 │   │   ├── api/
-│   │   │   └── cron/
-│   │   │       ├── advisories/
-│   │   │       │   └── route.ts        # Live social advisories API endpoint
-│   │   │       └── ingest/
-│   │   │           └── route.ts        # Panahon telemetry ingestion & MongoDB sync endpoint
+│   │   │   ├── cron/
+│   │   │   │   ├── advisories/
+│   │   │   │   │   └── route.ts        # Live social advisories API endpoint
+│   │   │   │   └── ingest/
+│   │   │   │       └── route.ts        # Panahon telemetry ingestion & MongoDB sync endpoint
+│   │   │   ├── flood/
+│   │   │   │   ├── elevation/
+│   │   │   │   │   └── route.ts        # DEM elevation lookup endpoint (single & batch)
+│   │   │   │   └── live/
+│   │   │   │       └── route.ts        # Viewport-scoped live flood & heatmap evaluation endpoint
+│   │   │   ├── geocode/
+│   │   │   │   └── route.ts            # OpenStreetMap Nominatim/Photon location search endpoint
+│   │   │   └── telemetry/
+│   │   │       └── route.ts            # Active telemetry stations & metrics endpoint
 │   │   ├── globals.css                 # Global Tailwind CSS 4 directives & animations
 │   │   ├── layout.tsx                  # Root HTML layout, metadata & PWA scripts
 │   │   ├── manifest.ts                 # Web App Manifest (PWA metadata & icons)
@@ -409,6 +446,217 @@ npm run test:modular-engine
 
 # 7. Run Advisory Visibility, Dynamic Multi-Pin Parser, and NLP Tests
 npm run test:advisories
+```
+
+## 📡 Bahaba Backend API Reference
+
+Bahaba provides a suite of Next.js route handlers querying MongoDB, spatial index trees, and real-time evaluation engines.
+
+### 1. Live Viewport Flood & Heatmap Evaluation (`GET /api/flood/live`)
+Computes and returns real-time road inundation risks, continuous flood heatmap points, weather metrics, and active stations scoped to a bounding box (`bbox`) or center coordinate.
+
+- **Query Parameters**:
+  - `bbox` *(optional, string)*: Viewport bounding box `south,west,north,east` (e.g. `14.50,120.95,14.70,121.10`).
+  - `lat`, `lng` *(optional, number)*: Center coordinates for localized weather lookup (defaults to Metro Manila center `14.60, 121.00`).
+  - `force=true` *(optional, boolean)*: Bypasses the 30-second regional in-memory cache.
+- **Cache Headers**: `Cache-Control: public, s-maxage=30, stale-while-revalidate=60`, `X-Cache: HIT-RAM | MISS | STALE-ERROR-FALLBACK`.
+- **Response Structure**:
+```json
+{
+  "success": true,
+  "calculatedAt": "2026-09-01T09:30:00.000Z",
+  "scrapedAt": "2026-09-01T09:15:00.000Z",
+  "metrics": {
+    "totalStations": 12,
+    "highRiskStationsCount": 2,
+    "floodedRoadsCount": 4,
+    "peakWaterLevel": 18.5,
+    "peakWaterStation": "Marikina Bridge",
+    "maxRain1h": 22.0,
+    "maxRain24h": 85.0
+  },
+  "stations": [...],
+  "roads": [
+    {
+      "id": "road-n170-espana",
+      "name": "España Boulevard",
+      "riskLevel": "ALARM",
+      "depthCm": 24.5,
+      "isFlooded": true,
+      "severity": "ALARM",
+      "passability": "NOT_PASSABLE_LIGHT"
+    }
+  ],
+  "heatmapPoints": [
+    { "lat": 14.608, "lng": 120.992, "intensity": 0.85, "depthCm": 24.5 }
+  ],
+  "weather": {
+    "metroManilaRainMmHr": 18.0,
+    "metroManilaRain24hMm": 64.0,
+    "forecast3hTotalMm": 12.0,
+    "trend": "INCREASING",
+    "conditionLabel": "Heavy Rain"
+  }
+}
+```
+
+---
+
+### 2. Live Social Advisories & Road Bulletins (`GET /api/cron/advisories`)
+Delivers active flood reports, passability statuses, and multi-location map pins scraped from official government accounts (@MMDA, @NDRRMC_OpCen, @dost_pagasa) and verified news networks.
+
+- **Query Parameters**:
+  - `limit` *(optional, integer, default `500`, max `2000`)*: Maximum advisory documents to return.
+  - `force=true` *(optional, boolean)*: Bypasses the 60-second in-memory response cache.
+- **Cache Headers**: `Cache-Control: public, s-maxage=60, stale-while-revalidate=180`, `X-Cache: HIT-MEMORY | MISS`.
+- **Response Structure**:
+```json
+{
+  "success": true,
+  "count": 48,
+  "cachedAt": "2026-09-01T09:30:00.000Z",
+  "advisories": [
+    {
+      "id": "x_1829381923812",
+      "source": "MMDA",
+      "authorName": "MMDA",
+      "authorHandle": "MMDA",
+      "publishedAt": "2026-09-01T08:45:00.000Z",
+      "cleanedText": "ADVISORY: As of 4:45 PM, G. Araneta / Talayan is NOT PASSABLE to all types of vehicles due to waist-deep flood.",
+      "severity": "CRITICAL",
+      "passability": "NOT_PASSABLE_ALL",
+      "depthCategory": "WAIST",
+      "depthInches": 37,
+      "road": "G. Araneta Ave",
+      "landmark": "Talayan",
+      "city": "Quezon City",
+      "coordinates": { "lat": 14.6368, "lng": 121.0112 },
+      "locationPins": [
+        {
+          "id": "pin-1829381923812-0",
+          "road": "G. Araneta Ave",
+          "landmark": "Talayan",
+          "coordinates": { "lat": 14.6368, "lng": 121.0112 },
+          "depthCategory": "WAIST",
+          "passability": "NOT_PASSABLE_ALL",
+          "severity": "CRITICAL"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### 3. Active Telemetry Stations & Metrics (`GET /api/telemetry`)
+Delivers normalized telemetry readings from DOST-PAGASA AWS sensors, river water level gauges, and synoptic stations stored in MongoDB.
+
+- **Query Parameters**:
+  - `force=true` *(optional, boolean)*: Bypasses the 30-second RAM cache.
+- **Response Structure**:
+```json
+{
+  "success": true,
+  "scrapedAt": "2026-09-01T09:15:00.000Z",
+  "cachedAt": "2026-09-01T09:30:00.000Z",
+  "metrics": {
+    "totalStations": 156,
+    "highRiskStationsCount": 5,
+    "peakWaterLevel": 18.2,
+    "peakWaterStation": "Marikina River (Sto. Niño)",
+    "maxRain1h": 35.0,
+    "maxRain24h": 112.5
+  },
+  "stations": [
+    {
+      "stationId": "aws_science_garden_quezon_city",
+      "stationName": "Science Garden, Quezon City",
+      "latitude": 14.6451,
+      "longitude": 121.0443,
+      "rain10min": 2.0,
+      "rain1h": 15.0,
+      "rain3h": 28.0,
+      "rain24h": 65.0,
+      "waterLevel": 0,
+      "riskLevel": "NORMAL",
+      "temperatureC": 28.4,
+      "heatIndexC": 34.1,
+      "humidityPercent": 82
+    }
+  ]
+}
+```
+
+---
+
+### 4. Digital Elevation Model (DEM) Lookup (`GET /api/flood/elevation`)
+Queries Open-Meteo DEM elevation data with in-memory caching and Metro Manila topological gradient fallbacks.
+
+- **Query Parameters (Single Coordinate)**:
+  - `lat=14.60&lng=120.99`
+- **Query Parameters (Batch Coordinates)**:
+  - `coords=14.60,120.99;14.61,121.00;14.62,121.01` (semicolon-separated pairs)
+- **Response Example (Single)**:
+```json
+{
+  "lat": 14.60,
+  "lng": 120.99,
+  "elevationM": 3.2
+}
+```
+- **Response Example (Batch)**:
+```json
+{
+  "elevations": [
+    { "lat": 14.60, "lng": 120.99, "elevationM": 3.2 },
+    { "lat": 14.61, "lng": 121.00, "elevationM": 5.8 }
+  ]
+}
+```
+
+---
+
+### 5. OpenStreetMap Location Search & Geocoding (`GET /api/geocode`)
+Provides debounced location search and autocomplete across the Philippines using OpenStreetMap Nominatim (with Photon fallback) adhering to OSM usage limits (1 req/sec) with a 1-hour server-side cache.
+
+- **Query Parameters**:
+  - `q` *(required, string, min 2 chars)*: Search keyword (e.g. `q=España Boulevard` or `q=UST Manila`).
+- **Response Structure**:
+```json
+{
+  "results": [
+    {
+      "id": "osm-nominatim-1029384",
+      "name": "España Boulevard",
+      "subtext": "Sampaloc, Manila",
+      "category": "landmark",
+      "coords": [14.6095, 120.9898]
+    }
+  ]
+}
+```
+
+---
+
+### 6. DOST-PAGASA Telemetry Ingestion & Sync (`GET /api/cron/ingest`)
+Triggered via cron every 15 minutes to scrape DOST-PAGASA Panahon endpoints, normalize telemetry rows, compute baseline risk levels, and persist consolidated snapshots into MongoDB `sync_meta` and active stations into `stations`.
+
+- **Query Parameters / Headers**:
+  - `?force=true` or Header `x-force-sync: true`: Bypasses the 15-minute sync interval check.
+- **Response Headers**: `X-Cache: HIT-MEMORY | HIT-MONGODB-SNAPSHOT | MISS-SCRAPED`, `X-Scrape-Duration-Ms`, `X-Rainfall-Rows`, `X-WaterLevel-Rows`, `X-DB-Persisted-Stations`.
+- **Response Structure**:
+```json
+{
+  "success": true,
+  "scrapedAt": "2026-09-01T09:15:00.000Z",
+  "stations": [...],
+  "meta": {
+    "rainfallRowCount": 156,
+    "waterLevelRowCount": 78,
+    "durationMs": 1120
+  }
+}
 ```
 
 ---
