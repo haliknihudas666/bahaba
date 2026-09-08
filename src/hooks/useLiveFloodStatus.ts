@@ -155,17 +155,17 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
           const url = `/api/flood/live?${params.toString()}`;
           const res = await fetch(url);
           if (!res.ok) {
-            // Fallback to legacy ingest route if /api/flood/live is unavailable
-            const fallbackRes = await fetch(force ? "/api/cron/ingest?force=true" : "/api/cron/ingest");
+            // Fallback to dedicated telemetry route if /api/flood/live is unavailable
+            const fallbackRes = await fetch(force ? "/api/telemetry?force=true" : "/api/telemetry");
             if (!fallbackRes.ok) {
-              throw new Error(`Telemetry fetch failed with status ${res.status}`);
+              throw new Error(`Telemetry fetch failed with status ${fallbackRes.status}`);
             }
             const fallbackData = await fallbackRes.json();
             return {
               success: true,
               calculatedAt: new Date().toISOString(),
               scrapedAt: fallbackData.scrapedAt || new Date().toISOString(),
-              metrics: {
+              metrics: fallbackData.metrics || {
                 totalStations: fallbackData.stations?.length || 0,
                 highRiskStationsCount: 0,
                 floodedRoadsCount: 0,
@@ -180,20 +180,20 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
                 maxRain24hStationId: null,
               },
               stations: (fallbackData.stations || []).map((st: any) => ({
-                stationId: st.stationName ? String(st.stationName).toLowerCase().replace(/[^a-z0-9]+/g, "-") : "station",
+                stationId: st.stationId || (st.stationName ? String(st.stationName).toLowerCase().replace(/[^a-z0-9]+/g, "-") : "station"),
                 stationName: st.stationName,
                 latitude: st.latitude,
                 longitude: st.longitude,
-                geohash: "",
-                rain10m: st.rainfall?.rain10min ?? 0,
-                rain1h: st.rainfall?.rain1hr ?? 0,
-                rain24h: st.rainfall?.rain24hr ?? 0,
-                waterLevel: st.waterLevel?.currentLevel ?? 0,
-                waterLevelDelta1h: st.waterLevel?.change1hr ?? 0,
+                geohash: st.geohash || "",
+                rain10m: st.rain10m ?? st.rainfall?.rain10min ?? 0,
+                rain1h: st.rain1h ?? st.rainfall?.rain1hr ?? 0,
+                rain24h: st.rain24h ?? st.rainfall?.rain24hr ?? 0,
+                waterLevel: st.waterLevel ?? st.waterLevel?.currentLevel ?? 0,
+                waterLevelDelta1h: st.waterLevelDelta1h ?? st.waterLevel?.change1hr ?? 0,
                 waterRiskLevel: st.waterRiskLevel || "NORMAL",
                 rainRiskLevel: st.rainRiskLevel || "NORMAL",
                 riskLevel: st.riskLevel || "NORMAL",
-                lastUpdated: parseTimestamp(st.observedAt) || new Date(),
+                lastUpdated: parseTimestamp(st.lastUpdated) || new Date(),
               })),
               roads: [],
               heatmapPoints: [],
@@ -201,8 +201,8 @@ export function useLiveFloodStatus(): UseLiveFloodStatusReturn {
                 metroManilaRainMmHr: 0,
                 metroManilaRain24hMm: 0,
                 forecast3hTotalMm: 0,
-                trend: "DRY",
-                conditionLabel: "Clear & Dry",
+                trend: "STEADY",
+                conditionLabel: "Weather data active",
               },
             } as LiveFloodResponse;
           }

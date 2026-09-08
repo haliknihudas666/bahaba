@@ -44,14 +44,19 @@ const memoryMeteoCache = new Map<string, { data: DistrictRainfall; expiresAt: nu
 const METEO_RAM_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
- * Dynamically access MongoDB collection on server-side only
+ * Dynamically access MongoDB collection on server-side only with timeout protection.
  */
 async function getWeatherMongoCollection(name: string) {
   if (typeof window !== "undefined") return null;
   try {
     const { getCollection } = await import("@/lib/mongodb/client");
-    return await getCollection(name);
-  } catch {
+    const colPromise = getCollection(name);
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error(`MongoDB collection '${name}' lookup timed out (4000ms)`)), 4000)
+    );
+    return await Promise.race([colPromise, timeoutPromise]);
+  } catch (err: any) {
+    console.warn(`[WeatherService] MongoDB collection '${name}' unavailable:`, err?.message || err);
     return null;
   }
 }
@@ -96,7 +101,18 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
     let isStale = true;
 
     if (syncMetaCol) {
-      metaDoc = await syncMetaCol.findOne({ _id: "telemetry" as any });
+      try {
+        metaDoc = await Promise.race([
+          syncMetaCol.findOne({ _id: "telemetry" as any }),
+          new Promise<null>((_, reject) =>
+            setTimeout(() => reject(new Error("findOne('telemetry') timed out (3000ms)")), 3000)
+          ),
+        ]);
+      } catch (findErr: any) {
+        console.warn("[WeatherService] MongoDB findOne('telemetry') error/timeout:", findErr?.message);
+        metaDoc = null;
+      }
+
       if (metaDoc) {
         const lastSynced = metaDoc.lastSyncedAt || metaDoc.updatedAtIso;
         const lastSyncedDate = lastSynced ? new Date(lastSynced) : null;

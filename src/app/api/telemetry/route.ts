@@ -154,7 +154,8 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
 }
 
 // ---------------------------------------------------------------------------
-// Route segment config (prevents Next.js aggressive static caching)
+// Route segment config (prevents Next.js aggressive static caching & extends Vercel serverless timeout)
 // ---------------------------------------------------------------------------
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60;

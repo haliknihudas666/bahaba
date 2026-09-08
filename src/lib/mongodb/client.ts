@@ -6,14 +6,19 @@
 import dns from "node:dns";
 import { MongoClient, Db, Collection, Document } from "mongodb";
 
-// Fix for Windows / Node / Bun c-ares DNS resolving to localhost 127.0.0.1 for SRV records
-try {
-  const currentServers = dns.getServers();
-  if (!currentServers.length || currentServers.every((s) => s === "127.0.0.1" || s === "::1")) {
-    dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+// Fix for Windows / Node / Bun c-ares DNS resolving to localhost 127.0.0.1 for SRV records.
+// IMPORTANT: Only apply this on Windows. In Linux / AWS Lambda / Vercel Serverless,
+// overriding DNS with public servers breaks internal VPC DNS routing and causes all
+// network and hostname lookups to fail or time out.
+if (process.platform === "win32") {
+  try {
+    const currentServers = dns.getServers();
+    if (!currentServers.length || currentServers.every((s) => s === "127.0.0.1" || s === "::1")) {
+      dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+    }
+  } catch {
+    // Ignore in environments where setServers is restricted
   }
-} catch {
-  // Ignore in environments where setServers is restricted
 }
 
 const uri = process.env.MONGODB_URI || "";
@@ -28,35 +33,41 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
-let clientPromise: Promise<MongoClient>;
+const mongoOptions = {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 5000,
+  socketTimeoutMS: 10000,
+};
 
-if (process.env.NODE_ENV === "development") {
-  // In development mode, use a global variable so that the value
-  // is preserved across module reloads caused by HMR (Hot Module Replacement).
-  if (!global._mongoClientPromise) {
-    if (uri) {
-      const client = new MongoClient(uri);
-      global._mongoClientPromise = client.connect();
-    } else {
-      global._mongoClientPromise = Promise.reject(new Error("MONGODB_URI is not set"));
-    }
+/**
+ * Lazily establishes and caches the MongoClient connection promise.
+ * Works across both development HMR and Vercel serverless warm invocations.
+ */
+function getOrCreateClientPromise(): Promise<MongoClient> {
+  if (!uri) {
+    return Promise.reject(new Error("MONGODB_URI environment variable is not defined"));
   }
-  clientPromise = global._mongoClientPromise;
-} else {
-  // In production mode, it's best to not use a global variable.
-  if (uri) {
-    const client = new MongoClient(uri);
-    clientPromise = client.connect();
-  } else {
-    clientPromise = Promise.reject(new Error("MONGODB_URI is not set"));
+
+  if (global._mongoClientPromise) {
+    return global._mongoClientPromise;
   }
+
+  const client = new MongoClient(uri, mongoOptions);
+  const promise = client.connect().catch((err) => {
+    // Clear cache on connection failure so subsequent requests can retry
+    global._mongoClientPromise = undefined;
+    throw err;
+  });
+
+  global._mongoClientPromise = promise;
+  return promise;
 }
 
 /**
  * Returns the connected MongoClient instance promise.
  */
 export async function getMongoClient(): Promise<MongoClient> {
-  return clientPromise;
+  return getOrCreateClientPromise();
 }
 
 /**
@@ -78,4 +89,4 @@ export async function getCollection<T extends Document = Document>(
   return db.collection<T>(collectionName);
 }
 
-export default clientPromise;
+export default getOrCreateClientPromise;
