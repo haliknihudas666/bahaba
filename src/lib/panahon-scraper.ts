@@ -290,6 +290,7 @@ export function parseObservedAtToIso(observedAt: string | undefined | null): str
 // ---------------------------------------------------------------------------
 
 let cachedPanahonSession: PanahonSessionData | null = null;
+let inflightSessionPromise: Promise<PanahonSessionData | null> | null = null;
 const SESSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -301,16 +302,26 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
     return cachedPanahonSession;
   }
 
-  try {
-    const res = await robustFetch(PANAHON_BASE, {
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-      timeoutMs: 10_000,
-    });
+  if (inflightSessionPromise && !forceRefresh) {
+    return inflightSessionPromise;
+  }
 
-    if (!res.ok) return cachedPanahonSession;
+  inflightSessionPromise = (async () => {
+    console.log(`[Panahon] Fetching fresh session credentials from ${PANAHON_BASE} (forceRefresh=${forceRefresh})...`);
+
+    try {
+      const res = await robustFetch(PANAHON_BASE, {
+        headers: {
+          "User-Agent": BROWSER_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+        timeoutMs: 10_000,
+      });
+
+    if (!res.ok) {
+      console.warn(`[Panahon] Failed to fetch landing page: HTTP ${res.status}`);
+      return cachedPanahonSession;
+    }
 
     const html = await res.text();
     const tokenMatch = html.match(/meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/i);
@@ -324,7 +335,10 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
     const sigMatch = html.match(/meta\s+name=["']api-sig["']\s+content=["']([^"']+)["']/i);
     let apiSig = sigMatch ? sigMatch[1] : "";
 
-    if (!token) return cachedPanahonSession;
+    if (!token) {
+      console.warn("[Panahon] Landing page did not contain a CSRF token meta tag.");
+      return cachedPanahonSession;
+    }
 
     // Extract all cookies from response
     const rawCookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
@@ -345,10 +359,13 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
         : "";
     }
 
+    console.log(`[Panahon] Landing page parsed: csrfToken=${!!token}, sigHandle=${!!handle}, cookiesLength=${cookies.length}`);
+
     // Perform two-step handle exchange if handle is provided
     if (handle) {
       try {
         const sigUrl = `${PANAHON_BASE}/api/v1/sig?token=${encodeURIComponent(token)}`;
+        console.log(`[Panahon] Exchanging signature handle with ${sigUrl}...`);
         const sigRes = await robustFetch(sigUrl, {
           method: "GET",
           headers: {
@@ -366,6 +383,7 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
           const sigJson = await sigRes.json();
           if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
             apiSig = sigJson.secret;
+            console.log("[Panahon] Active HMAC signing secret successfully acquired.");
           }
         } else {
           console.warn(`[Panahon] Signature handle exchange returned HTTP ${sigRes.status}`);
@@ -390,6 +408,11 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
     console.warn("[Panahon] Session handshake warning:", err instanceof Error ? err.message : err);
     return cachedPanahonSession;
   }
+  })().finally(() => {
+    inflightSessionPromise = null;
+  });
+
+  return inflightSessionPromise;
 }
 
 /**
@@ -483,6 +506,7 @@ async function executeSignedPanahonGet(
 
   // If unauthorized, forbidden, or not found (often indicating an expired or rejected session), retry once with fresh session
   if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404) && !tokenOverride) {
+    console.warn(`[Panahon] ${urlPath} returned HTTP ${res.status}. Refreshing session credentials and retrying...`);
     const freshSession = await getPanahonSession(true);
     if (freshSession?.token) {
       session = {
@@ -495,13 +519,17 @@ async function executeSignedPanahonGet(
   }
 
   if (!res.ok) {
+    console.warn(`[Panahon] Request failed for ${urlPath}: HTTP ${res.status}`);
     return { ok: false, status: res.status, data: null };
   }
 
   try {
     const json = await res.json();
+    const count = Array.isArray(json) ? json.length : Array.isArray(json?.data) ? json.data.length : (json?.data ? 1 : 0);
+    console.log(`[Panahon] ${urlPath} -> HTTP 200 (${count} items)`);
     return { ok: true, status: res.status, data: json };
   } catch {
+    console.warn(`[Panahon] Failed to parse JSON response from ${urlPath}`);
     return { ok: false, status: res.status, data: null };
   }
 }

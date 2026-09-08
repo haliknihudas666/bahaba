@@ -44,7 +44,13 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
   }
 
   const now = Date.now();
+  console.log(`[/api/telemetry] GET request received (force=${force})`);
+
   if (!force && cachedTelemetryResponse && now - cachedTelemetryAt < TELEMETRY_CACHE_TTL_MS) {
+    const ageSec = Math.round((now - cachedTelemetryAt) / 1000);
+    console.log(
+      `[/api/telemetry] RAM cache HIT: serving ${cachedTelemetryResponse.stations.length} stations (cached ${ageSec}s ago, scrapedAt: ${cachedTelemetryResponse.scrapedAt})`
+    );
     return NextResponse.json(cachedTelemetryResponse, {
       status: 200,
       headers: {
@@ -55,6 +61,7 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
   }
 
   try {
+    console.log(`[/api/telemetry] Fetching latest telemetry snapshot (force=${force})...`);
     const { stations, scrapedAt } = await getLatestTelemetrySnapshot(force);
 
     let peakWater = 0;
@@ -115,6 +122,10 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
     cachedTelemetryResponse = result;
     cachedTelemetryAt = now;
 
+    console.log(
+      `[/api/telemetry] Successfully delivered ${stations.length} stations (scrapedAt: ${scrapedAt}, peakWater: ${peakWater}m @ ${peakWaterStation}, maxRain1h: ${maxRain1h}mm @ ${maxRain1hStation}, highRisk: ${highRiskCount})`
+    );
+
     return NextResponse.json(result, {
       status: 200,
       headers: {
@@ -125,6 +136,7 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
   } catch (err: any) {
     console.error("[/api/telemetry] Error fetching telemetry:", err);
     if (cachedTelemetryResponse) {
+      console.warn("[/api/telemetry] Serving stale RAM fallback due to error");
       return NextResponse.json(cachedTelemetryResponse, {
         status: 200,
         headers: {
@@ -140,3 +152,9 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Route segment config (prevents Next.js aggressive static caching)
+// ---------------------------------------------------------------------------
+export const dynamic = "force-dynamic";
+export const revalidate = 0;

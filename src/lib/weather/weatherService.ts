@@ -85,6 +85,8 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
 export async function getLatestTelemetryStations(force = false): Promise<LiveStation[]> {
   const now = Date.now();
   if (!force && memoryStationsCache && now - memoryStationsCachedAt < STATIONS_RAM_TTL_MS) {
+    const ageSec = Math.round((now - memoryStationsCachedAt) / 1000);
+    console.log(`[WeatherService] RAM cache HIT: ${memoryStationsCache.length} stations (age: ${ageSec}s)`);
     return memoryStationsCache;
   }
 
@@ -98,11 +100,19 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
       if (metaDoc) {
         const lastSynced = metaDoc.lastSyncedAt || metaDoc.updatedAtIso;
         const lastSyncedDate = lastSynced ? new Date(lastSynced) : null;
-        isStale = !lastSyncedDate || isNaN(lastSyncedDate.getTime()) || (now - lastSyncedDate.getTime() > 20 * 60 * 1000);
+        // Consider data stale if older than 5 minutes
+        isStale = !lastSyncedDate || isNaN(lastSyncedDate.getTime()) || (now - lastSyncedDate.getTime() > 5 * 60 * 1000);
+        const ageSec = lastSyncedDate ? Math.round((now - lastSyncedDate.getTime()) / 1000) : "N/A";
+        console.log(
+          `[WeatherService] MongoDB sync_meta doc found: stations=${metaDoc.stations?.length ?? 0}, lastSynced=${lastSynced} (age: ${ageSec}s, isStale: ${isStale})`
+        );
+      } else {
+        console.log("[WeatherService] MongoDB sync_meta: no 'telemetry' doc found.");
       }
 
-      // If DB record exists and is fresh (< 20 mins) and force is not set, use DB record
+      // If DB record exists and is fresh (< 5 mins) and force is not set, use DB record
       if (!force && !isStale && metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
+        console.log(`[WeatherService] Serving ${metaDoc.stations.length} stations from fresh DB snapshot.`);
         memoryStationsScrapedAt = metaDoc.updatedAtIso || metaDoc.lastSyncedAt || metaDoc.scrapedAt || new Date().toISOString();
         const mapped: LiveStation[] = metaDoc.stations.map((st: any) => {
           const fallbackCoords = getStationCoords(st.stationName);
@@ -131,7 +141,10 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
       }
     }
 
-    // If DB is stale (> 20 mins), force requested, or DB is empty, trigger self-healing live ingest
+    // If DB is stale (> 5 mins), force requested, or DB is empty, trigger self-healing live ingest
+    console.log(
+      `[WeatherService] Snapshot is stale or force requested (force=${force}, isStale=${isStale}). Triggering on-demand Panahon scrape...`
+    );
     try {
       const { ingestTelemetry } = await import("@/lib/scraper");
       const { convertPanahonToLiveStations } = await import("@/lib/panahon-scraper");
@@ -143,6 +156,10 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
         memoryStationsScrapedAt = scrapeResult.scrapedAt || new Date().toISOString();
         memoryStationsCache = liveStations;
         memoryStationsCachedAt = now;
+
+        console.log(
+          `[WeatherService] On-demand scrape SUCCESS: ${liveStations.length} stations scraped in ${scrapeResult.meta.durationMs}ms. Updating MongoDB...`
+        );
 
         // Asynchronously persist fresh snapshot to MongoDB so subsequent calls hit DB cache
         if (syncMetaCol) {
@@ -174,10 +191,14 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
               },
             },
             { upsert: true }
-          ).catch((e: any) => console.warn("[WeatherService] Background sync_meta update error:", e.message));
+          ).then(() => {
+            console.log("[WeatherService] MongoDB sync_meta successfully updated with fresh snapshot.");
+          }).catch((e: any) => console.warn("[WeatherService] Background sync_meta update error:", e.message));
         }
 
         return liveStations;
+      } else {
+        console.warn(`[WeatherService] On-demand scrape returned success=${scrapeResult.success}, count=${scrapeResult.stations?.length ?? 0}`);
       }
     } catch (ingestErr) {
       console.warn("[WeatherService] On-demand live ingest failed, falling back to cached DB:", ingestErr);
@@ -185,6 +206,7 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
 
     // Resilience fallback to stale DB record if live ingest did not return data
     if (metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
+      console.warn(`[WeatherService] Using stale DB fallback record (${metaDoc.stations.length} stations)`);
       memoryStationsScrapedAt = metaDoc.updatedAtIso || metaDoc.lastSyncedAt || metaDoc.scrapedAt || new Date().toISOString();
       const mapped: LiveStation[] = metaDoc.stations.map((st: any) => {
         const fallbackCoords = getStationCoords(st.stationName);
