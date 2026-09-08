@@ -82,18 +82,27 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
 /**
  * Retrieve active PAGASA telemetry stations from MongoDB on server.
  */
-export async function getLatestTelemetryStations(): Promise<LiveStation[]> {
+export async function getLatestTelemetryStations(force = false): Promise<LiveStation[]> {
   const now = Date.now();
-  if (memoryStationsCache && now - memoryStationsCachedAt < STATIONS_RAM_TTL_MS) {
+  if (!force && memoryStationsCache && now - memoryStationsCachedAt < STATIONS_RAM_TTL_MS) {
     return memoryStationsCache;
   }
 
   try {
     const syncMetaCol = await getWeatherMongoCollection("sync_meta");
-    if (syncMetaCol) {
-      const metaDoc = await syncMetaCol.findOne({ _id: "telemetry" as any });
+    let metaDoc: any = null;
+    let isStale = true;
 
-      if (metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
+    if (syncMetaCol) {
+      metaDoc = await syncMetaCol.findOne({ _id: "telemetry" as any });
+      if (metaDoc) {
+        const lastSynced = metaDoc.lastSyncedAt || metaDoc.updatedAtIso;
+        const lastSyncedDate = lastSynced ? new Date(lastSynced) : null;
+        isStale = !lastSyncedDate || isNaN(lastSyncedDate.getTime()) || (now - lastSyncedDate.getTime() > 20 * 60 * 1000);
+      }
+
+      // If DB record exists and is fresh (< 20 mins) and force is not set, use DB record
+      if (!force && !isStale && metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
         memoryStationsScrapedAt = metaDoc.updatedAtIso || metaDoc.lastSyncedAt || metaDoc.scrapedAt || new Date().toISOString();
         const mapped: LiveStation[] = metaDoc.stations.map((st: any) => {
           const fallbackCoords = getStationCoords(st.stationName);
@@ -103,9 +112,9 @@ export async function getLatestTelemetryStations(): Promise<LiveStation[]> {
             latitude: st.coordinates?.latitude ?? fallbackCoords.lat,
             longitude: st.coordinates?.longitude ?? fallbackCoords.lng,
             geohash: st.geohash || "",
-            rain10m: st.rainfall?.rain10min ?? 0,
-            rain1h: st.rainfall?.rain1hr ?? 0,
-            rain24h: st.rainfall?.rain24hr ?? 0,
+            rain10m: st.rainfall?.rain10min ?? st.rain10m ?? 0,
+            rain1h: st.rainfall?.rain1hr ?? st.rain1h ?? 0,
+            rain24h: st.rainfall?.rain24hr ?? st.rain24h ?? 0,
             waterLevel: st.waterLevel ?? 0,
             waterLevelDelta1h: st.waterLevelDelta1h ?? 0,
             waterRiskLevel: st.waterRiskLevel || st.riskLevel || "NORMAL",
@@ -120,6 +129,87 @@ export async function getLatestTelemetryStations(): Promise<LiveStation[]> {
         memoryStationsCachedAt = now;
         return mapped;
       }
+    }
+
+    // If DB is stale (> 20 mins), force requested, or DB is empty, trigger self-healing live ingest
+    try {
+      const { ingestTelemetry } = await import("@/lib/scraper");
+      const { convertPanahonToLiveStations } = await import("@/lib/panahon-scraper");
+      const scrapeResult = await ingestTelemetry();
+
+      if (scrapeResult.success && scrapeResult.stations.length > 0) {
+        const liveStations = convertPanahonToLiveStations(scrapeResult.stations);
+        liveStations.sort((a, b) => a.stationName.localeCompare(b.stationName));
+        memoryStationsScrapedAt = scrapeResult.scrapedAt || new Date().toISOString();
+        memoryStationsCache = liveStations;
+        memoryStationsCachedAt = now;
+
+        // Asynchronously persist fresh snapshot to MongoDB so subsequent calls hit DB cache
+        if (syncMetaCol) {
+          syncMetaCol.updateOne(
+            { _id: "telemetry" as any },
+            {
+              $set: {
+                _id: "telemetry" as any,
+                lastSyncedAt: memoryStationsScrapedAt,
+                stationCount: liveStations.length,
+                status: "SUCCESS",
+                updatedAtIso: memoryStationsScrapedAt,
+                stations: liveStations.map((s) => ({
+                  stationId: s.stationId,
+                  stationName: s.stationName,
+                  coordinates: { latitude: s.latitude, longitude: s.longitude },
+                  location: { type: "Point", coordinates: [s.longitude, s.latitude] },
+                  geohash: s.geohash,
+                  rain10m: s.rain10m,
+                  rain1h: s.rain1h,
+                  rain24h: s.rain24h,
+                  waterLevel: s.waterLevel,
+                  waterLevelDelta1h: s.waterLevelDelta1h,
+                  waterRiskLevel: s.waterRiskLevel,
+                  rainRiskLevel: s.rainRiskLevel,
+                  riskLevel: s.riskLevel,
+                  lastUpdated: s.lastUpdated instanceof Date ? s.lastUpdated.toISOString() : s.lastUpdated,
+                })),
+              },
+            },
+            { upsert: true }
+          ).catch((e: any) => console.warn("[WeatherService] Background sync_meta update error:", e.message));
+        }
+
+        return liveStations;
+      }
+    } catch (ingestErr) {
+      console.warn("[WeatherService] On-demand live ingest failed, falling back to cached DB:", ingestErr);
+    }
+
+    // Resilience fallback to stale DB record if live ingest did not return data
+    if (metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
+      memoryStationsScrapedAt = metaDoc.updatedAtIso || metaDoc.lastSyncedAt || metaDoc.scrapedAt || new Date().toISOString();
+      const mapped: LiveStation[] = metaDoc.stations.map((st: any) => {
+        const fallbackCoords = getStationCoords(st.stationName);
+        return {
+          stationId: st.stationId || slugifyStationId(st.stationName),
+          stationName: st.stationName,
+          latitude: st.coordinates?.latitude ?? fallbackCoords.lat,
+          longitude: st.coordinates?.longitude ?? fallbackCoords.lng,
+          geohash: st.geohash || "",
+          rain10m: st.rainfall?.rain10min ?? st.rain10m ?? 0,
+          rain1h: st.rainfall?.rain1hr ?? st.rain1h ?? 0,
+          rain24h: st.rainfall?.rain24hr ?? st.rain24h ?? 0,
+          waterLevel: st.waterLevel ?? 0,
+          waterLevelDelta1h: st.waterLevelDelta1h ?? 0,
+          waterRiskLevel: st.waterRiskLevel || st.riskLevel || "NORMAL",
+          rainRiskLevel: st.rainRiskLevel || "NORMAL",
+          riskLevel: st.riskLevel || "NORMAL",
+          lastUpdated: st.lastUpdated ? new Date(st.lastUpdated) : new Date(),
+        };
+      });
+
+      mapped.sort((a, b) => a.stationName.localeCompare(b.stationName));
+      memoryStationsCache = mapped;
+      memoryStationsCachedAt = now;
+      return mapped;
     }
 
     // Fallback directly to stations collection
@@ -165,8 +255,8 @@ export async function getLatestTelemetryStations(): Promise<LiveStation[]> {
  * Retrieve latest telemetry stations along with the authoritative scrape timestamp.
  * Ensures the scrape timestamp is never in the future.
  */
-export async function getLatestTelemetrySnapshot(): Promise<{ stations: LiveStation[]; scrapedAt: string }> {
-  const stations = await getLatestTelemetryStations();
+export async function getLatestTelemetrySnapshot(force = false): Promise<{ stations: LiveStation[]; scrapedAt: string }> {
+  const stations = await getLatestTelemetryStations(force);
   const rawScrapedAt = memoryStationsScrapedAt || new Date().toISOString();
   const scrapedAtDate = new Date(rawScrapedAt);
   const scrapedAt = !isNaN(scrapedAtDate.getTime()) && scrapedAtDate.getTime() <= Date.now()

@@ -55,7 +55,7 @@ export async function GET(req?: Request): Promise<NextResponse<TelemetryApiRespo
   }
 
   try {
-    const { stations, scrapedAt } = await getLatestTelemetrySnapshot();
+    const { stations, scrapedAt } = await getLatestTelemetrySnapshot(force);
 
     let peakWater = 0;
     let peakWaterStation = "N/A";

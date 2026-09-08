@@ -50,7 +50,16 @@ export async function robustFetch(
     headers?: Record<string, string>;
     timeoutMs?: number;
   } = {}
-): Promise<{ ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<any>; headers: { get: (k: string) => string | null } }> {
+): Promise<{
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+  json: () => Promise<any>;
+  headers: {
+    get: (k: string) => string | null;
+    getSetCookie?: () => string[];
+  };
+}> {
   const timeout = options.timeoutMs || REQUEST_TIMEOUT_MS;
 
   try {
@@ -59,7 +68,19 @@ export async function robustFetch(
       headers: options.headers,
       signal: AbortSignal.timeout(timeout),
     });
-    return res;
+    return {
+      ok: res.ok,
+      status: res.status,
+      text: () => res.text(),
+      json: () => res.json(),
+      headers: {
+        get: (k: string) => res.headers.get(k),
+        getSetCookie: () =>
+          typeof (res.headers as any).getSetCookie === "function"
+            ? (res.headers as any).getSetCookie()
+            : [],
+      },
+    };
   } catch {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
@@ -85,6 +106,10 @@ export async function robustFetch(
                 get: (k: string) => {
                   const val = res.headers[k.toLowerCase()];
                   return Array.isArray(val) ? val.join(", ") : val || null;
+                },
+                getSetCookie: () => {
+                  const raw = res.headers["set-cookie"];
+                  return Array.isArray(raw) ? raw : raw ? [raw] : [];
                 },
               },
             });
@@ -265,10 +290,10 @@ export function parseObservedAtToIso(observedAt: string | undefined | null): str
 // ---------------------------------------------------------------------------
 
 let cachedPanahonSession: PanahonSessionData | null = null;
-const SESSION_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SESSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Fetches CSRF token, api-sig signing secret, and session cookies dynamically from the Panahon landing page.
+ * Fetches CSRF token, session cookies, and exchanges api-sig-handle for the HMAC signing secret.
  */
 export async function getPanahonSession(forceRefresh = false): Promise<PanahonSessionData | null> {
   const now = Date.now();
@@ -291,18 +316,67 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
     const tokenMatch = html.match(/meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/i);
     const token = tokenMatch ? tokenMatch[1] : null;
 
+    // Check for dynamic ephemeral handle exchange meta tag
+    const handleMatch = html.match(/meta\s+name=["']api-sig-handle["']\s+content=["']([^"']+)["']/i);
+    const handle = handleMatch ? handleMatch[1] : null;
+
+    // Backward compatibility fallback for legacy static api-sig meta tag
     const sigMatch = html.match(/meta\s+name=["']api-sig["']\s+content=["']([^"']+)["']/i);
-    const apiSig = sigMatch ? sigMatch[1] : "";
+    let apiSig = sigMatch ? sigMatch[1] : "";
 
     if (!token) return cachedPanahonSession;
 
-    const setCookie = res.headers.get("set-cookie");
-    const cookies = setCookie
-      ? setCookie
-          .split(",")
-          .map((c) => c.split(";")[0].trim())
-          .join("; ")
-      : "";
+    // Extract all cookies from response
+    const rawCookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+    let cookies = "";
+    if (rawCookies.length > 0) {
+      cookies = rawCookies
+        .map((c) => c.split(";")[0].trim())
+        .filter(Boolean)
+        .join("; ");
+    } else {
+      const setCookie = res.headers.get("set-cookie");
+      cookies = setCookie
+        ? setCookie
+            .split(",")
+            .map((c) => c.split(";")[0].trim())
+            .filter(Boolean)
+            .join("; ")
+        : "";
+    }
+
+    // Perform two-step handle exchange if handle is provided
+    if (handle) {
+      try {
+        const sigUrl = `${PANAHON_BASE}/api/v1/sig?token=${encodeURIComponent(token)}`;
+        const sigRes = await robustFetch(sigUrl, {
+          method: "GET",
+          headers: {
+            "User-Agent": BROWSER_USER_AGENT,
+            Referer: `${PANAHON_BASE}/`,
+            "X-Sig-Handle": handle,
+            ...(cookies ? { Cookie: cookies } : {}),
+            "X-Requested-With": "XMLHttpRequest",
+            Accept: "application/json, text/javascript, */*; q=0.01",
+          },
+          timeoutMs: 10_000,
+        });
+
+        if (sigRes.ok) {
+          const sigJson = await sigRes.json();
+          if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
+            apiSig = sigJson.secret;
+          }
+        } else {
+          console.warn(`[Panahon] Signature handle exchange returned HTTP ${sigRes.status}`);
+        }
+      } catch (handshakeErr) {
+        console.warn(
+          "[Panahon] Signature handle exchange error:",
+          handshakeErr instanceof Error ? handshakeErr.message : handshakeErr
+        );
+      }
+    }
 
     cachedPanahonSession = {
       token,
@@ -370,6 +444,68 @@ async function resolveSession(tokenOverride?: string): Promise<{ token: string; 
   return { token: DEFAULT_PANAHON_TOKEN };
 }
 
+/**
+ * Centralized signed GET executor for all Panahon API endpoints with auto-retry.
+ */
+async function executeSignedPanahonGet(
+  urlPath: string,
+  searchParams: Record<string, string> = {},
+  tokenOverride?: string
+): Promise<{ ok: boolean; status: number; data: any }> {
+  let session = await resolveSession(tokenOverride);
+
+  const buildUrl = (sess: { token: string; apiSig?: string; cookies?: string }) => {
+    const u = new URL(urlPath, PANAHON_BASE);
+    u.searchParams.set("token", sess.token);
+    for (const [k, v] of Object.entries(searchParams)) {
+      u.searchParams.set(k, v);
+    }
+    return u.toString();
+  };
+
+  const doFetch = async (sess: { token: string; apiSig?: string; cookies?: string }) => {
+    const fullUrl = buildUrl(sess);
+    const signedHeaders = computePanahonHeaders("GET", fullUrl, sess.apiSig);
+    return await robustFetch(fullUrl, {
+      headers: {
+        "User-Agent": BROWSER_USER_AGENT,
+        Referer: `${PANAHON_BASE}/`,
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        ...(sess.cookies ? { Cookie: sess.cookies } : {}),
+        ...signedHeaders,
+      },
+      timeoutMs: REQUEST_TIMEOUT_MS,
+    });
+  };
+
+  let res = await doFetch(session);
+
+  // If unauthorized, forbidden, or not found (often indicating an expired or rejected session), retry once with fresh session
+  if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404) && !tokenOverride) {
+    const freshSession = await getPanahonSession(true);
+    if (freshSession?.token) {
+      session = {
+        token: freshSession.token,
+        apiSig: freshSession.apiSig,
+        cookies: freshSession.cookies,
+      };
+      res = await doFetch(session);
+    }
+  }
+
+  if (!res.ok) {
+    return { ok: false, status: res.status, data: null };
+  }
+
+  try {
+    const json = await res.json();
+    return { ok: true, status: res.status, data: json };
+  } catch {
+    return { ok: false, status: res.status, data: null };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Low-Level Fetchers
 // ---------------------------------------------------------------------------
@@ -382,28 +518,11 @@ export async function fetchPanahonAws(
   tokenOverride?: string
 ): Promise<PanahonRawItem[]> {
   try {
-    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
-    const url = `${PANAHON_BASE}/api/v1/aws?token=${encodeURIComponent(token)}&parameter=${encodeURIComponent(parameter)}`;
-    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
-
-    const res = await robustFetch(url, {
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Referer: PANAHON_BASE,
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
-        ...(cookies ? { Cookie: cookies } : {}),
-        ...signedHeaders,
-      },
-      timeoutMs: REQUEST_TIMEOUT_MS,
-    });
-
-    if (!res.ok) return [];
-
-    const json: PanahonApiResponse = await res.json();
-    if (!json.success || !Array.isArray(json.data)) return [];
-
-    return json.data;
+    const res = await executeSignedPanahonGet("/api/v1/aws", { parameter }, tokenOverride);
+    if (!res.ok || !res.data) return [];
+    if (Array.isArray(res.data)) return res.data;
+    if (res.data.success && Array.isArray(res.data.data)) return res.data.data;
+    return [];
   } catch (err) {
     console.warn(`[Panahon] AWS fetch error for '${parameter}':`, err instanceof Error ? err.message : err);
     return [];
@@ -418,29 +537,12 @@ export async function fetchPanahonRiverbasin(
   tokenOverride?: string
 ): Promise<PanahonRawItem[]> {
   try {
-    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
     const endpoint = parameter === "raingauge" ? "raingauge" : "waterlevel";
-    const url = `${PANAHON_BASE}/api/v1/riverbasin/${endpoint}?token=${encodeURIComponent(token)}&parameter=${encodeURIComponent(parameter)}`;
-    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
-
-    const res = await robustFetch(url, {
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Referer: PANAHON_BASE,
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
-        ...(cookies ? { Cookie: cookies } : {}),
-        ...signedHeaders,
-      },
-      timeoutMs: REQUEST_TIMEOUT_MS,
-    });
-
-    if (!res.ok) return [];
-
-    const json: PanahonApiResponse = await res.json();
-    if (!json.success || !Array.isArray(json.data)) return [];
-
-    return json.data;
+    const res = await executeSignedPanahonGet(`/api/v1/riverbasin/${endpoint}`, { parameter }, tokenOverride);
+    if (!res.ok || !res.data) return [];
+    if (Array.isArray(res.data)) return res.data;
+    if (res.data.success && Array.isArray(res.data.data)) return res.data.data;
+    return [];
   } catch (err) {
     console.warn(`[Panahon] Riverbasin fetch error for '${parameter}':`, err instanceof Error ? err.message : err);
     return [];
@@ -455,28 +557,11 @@ export async function fetchPanahonSynop(
   tokenOverride?: string
 ): Promise<PanahonRawItem[]> {
   try {
-    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
-    const url = `${PANAHON_BASE}/api/v1/synop?token=${encodeURIComponent(token)}&parameter=${encodeURIComponent(parameter)}`;
-    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
-
-    const res = await robustFetch(url, {
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Referer: PANAHON_BASE,
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
-        ...(cookies ? { Cookie: cookies } : {}),
-        ...signedHeaders,
-      },
-      timeoutMs: REQUEST_TIMEOUT_MS,
-    });
-
-    if (!res.ok) return [];
-
-    const json: PanahonApiResponse = await res.json();
-    if (!json.success || !Array.isArray(json.data)) return [];
-
-    return json.data;
+    const res = await executeSignedPanahonGet("/api/v1/synop", { parameter }, tokenOverride);
+    if (!res.ok || !res.data) return [];
+    if (Array.isArray(res.data)) return res.data;
+    if (res.data.success && Array.isArray(res.data.data)) return res.data.data;
+    return [];
   } catch (err) {
     console.warn(`[Panahon] Synop fetch error for '${parameter}':`, err instanceof Error ? err.message : err);
     return [];
@@ -490,28 +575,10 @@ export async function fetchPanahonCycloneTrack(
   tokenOverride?: string
 ): Promise<PanahonCycloneTrackItem[]> {
   try {
-    const { token, apiSig, cookies } = await resolveSession(tokenOverride);
-    const url = `${PANAHON_BASE}/api/v1/cyclone-track?token=${encodeURIComponent(token)}`;
-    const signedHeaders = computePanahonHeaders("GET", url, apiSig);
-
-    const res = await robustFetch(url, {
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Referer: PANAHON_BASE,
-        Accept: "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
-        ...(cookies ? { Cookie: cookies } : {}),
-        ...signedHeaders,
-      },
-      timeoutMs: REQUEST_TIMEOUT_MS,
-    });
-
-    if (!res.ok) return [];
-
-    const json = await res.json();
-    if (Array.isArray(json)) return json as PanahonCycloneTrackItem[];
-    if (json.data && Array.isArray(json.data)) return json.data as PanahonCycloneTrackItem[];
-
+    const res = await executeSignedPanahonGet("/api/v1/cyclone-track", {}, tokenOverride);
+    if (!res.ok || !res.data) return [];
+    if (Array.isArray(res.data)) return res.data as PanahonCycloneTrackItem[];
+    if (res.data.data && Array.isArray(res.data.data)) return res.data.data as PanahonCycloneTrackItem[];
     return [];
   } catch (err) {
     console.warn("[Panahon] Cyclone track fetch error:", err instanceof Error ? err.message : err);
