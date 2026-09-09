@@ -67,6 +67,7 @@ export async function robustFetch(
       method: options.method || "GET",
       headers: options.headers,
       signal: AbortSignal.timeout(timeout),
+      cache: "no-store",
     });
     return {
       ok: res.ok,
@@ -302,7 +303,7 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
     return cachedPanahonSession;
   }
 
-  if (inflightSessionPromise && !forceRefresh) {
+  if (inflightSessionPromise) {
     return inflightSessionPromise;
   }
 
@@ -340,7 +341,7 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
       return cachedPanahonSession;
     }
 
-    // Extract all cookies from response
+    // Extract all cookies from response safely without breaking expires dates
     const rawCookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
     let cookies = "";
     if (rawCookies.length > 0) {
@@ -350,13 +351,13 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
         .join("; ");
     } else {
       const setCookie = res.headers.get("set-cookie");
-      cookies = setCookie
-        ? setCookie
-            .split(",")
-            .map((c) => c.split(";")[0].trim())
-            .filter(Boolean)
-            .join("; ")
-        : "";
+      if (setCookie) {
+        const parts = setCookie.split(/,\s*(?=[a-zA-Z0-9_\-]+=[^;]+)/);
+        cookies = parts
+          .map((c) => c.split(";")[0].trim())
+          .filter(Boolean)
+          .join("; ");
+      }
     }
 
     console.log(`[Panahon] Landing page parsed: csrfToken=${!!token}, sigHandle=${!!handle}, cookiesLength=${cookies.length}`);
@@ -384,6 +385,13 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
           if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
             apiSig = sigJson.secret;
             console.log("[Panahon] Active HMAC signing secret successfully acquired.");
+          }
+
+          // Merge updated session cookies from sig exchange if any
+          const sigRawCookies = typeof sigRes.headers.getSetCookie === "function" ? sigRes.headers.getSetCookie() : [];
+          if (sigRawCookies.length > 0) {
+            const extra = sigRawCookies.map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
+            cookies = cookies ? `${cookies}; ${extra}` : extra;
           }
         } else {
           console.warn(`[Panahon] Signature handle exchange returned HTTP ${sigRes.status}`);
@@ -1051,4 +1059,115 @@ export function convertPanahonToLiveStations(telemetry: StationTelemetry[]): Liv
       lastUpdated: isNaN(lastUpdatedDate.getTime()) ? new Date() : lastUpdatedDate,
     };
   });
+}
+
+/**
+ * Diagnostic tool to verify live connectivity to DOST-PAGASA Panahon portal.
+ */
+export async function diagnosePanahonConnection(): Promise<Record<string, any>> {
+  const t0 = Date.now();
+  const report: Record<string, any> = { timestamp: new Date().toISOString() };
+
+  try {
+    // Step 1: Landing page
+    const landingRes = await robustFetch(PANAHON_BASE, {
+      headers: {
+        "User-Agent": BROWSER_USER_AGENT,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      timeoutMs: 10_000,
+    });
+    report.step1_landing = {
+      ok: landingRes.ok,
+      status: landingRes.status,
+      durationMs: Date.now() - t0,
+    };
+
+    if (!landingRes.ok) return report;
+    const html = await landingRes.text();
+    const tokenMatch = html.match(/meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/i);
+    const token = tokenMatch ? tokenMatch[1] : null;
+    const handleMatch = html.match(/meta\s+name=["']api-sig-handle["']\s+content=["']([^"']+)["']/i);
+    const handle = handleMatch ? handleMatch[1] : null;
+    const rawCookies = typeof landingRes.headers.getSetCookie === "function" ? landingRes.headers.getSetCookie() : [];
+    let cookies = "";
+    if (rawCookies.length > 0) {
+      cookies = rawCookies.map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
+    } else {
+      const sc = landingRes.headers.get("set-cookie");
+      if (sc) {
+        cookies = sc.split(/,\s*(?=[a-zA-Z0-9_\-]+=[^;]+)/).map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
+      }
+    }
+
+    report.step1_landing.csrfTokenFound = !!token;
+    report.step1_landing.sigHandleFound = !!handle;
+    report.step1_landing.cookieCount = cookies ? cookies.split(";").length : 0;
+
+    if (!token || !handle) return report;
+
+    // Step 2: Handle Exchange
+    const t1 = Date.now();
+    const sigUrl = `${PANAHON_BASE}/api/v1/sig?token=${encodeURIComponent(token)}`;
+    const sigRes = await robustFetch(sigUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": BROWSER_USER_AGENT,
+        Referer: `${PANAHON_BASE}/`,
+        "X-Sig-Handle": handle,
+        ...(cookies ? { Cookie: cookies } : {}),
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "application/json, text/javascript, */*; q=0.01",
+      },
+      timeoutMs: 10_000,
+    });
+
+    const sigText = await sigRes.text();
+    let sigJson: any = null;
+    try { sigJson = JSON.parse(sigText); } catch {}
+
+    report.step2_sigExchange = {
+      ok: sigRes.ok,
+      status: sigRes.status,
+      durationMs: Date.now() - t1,
+      secretAcquired: !!(sigJson && sigJson.secret),
+      rawSnippet: sigText.slice(0, 100),
+    };
+
+    if (!sigJson?.secret) return report;
+
+    // Step 3: Test signed GET
+    const t2 = Date.now();
+    const awsUrl = `${PANAHON_BASE}/api/v1/aws?token=${encodeURIComponent(token)}&parameter=rainfall`;
+    const signedHeaders = computePanahonHeaders("GET", awsUrl, sigJson.secret);
+    const awsRes = await robustFetch(awsUrl, {
+      headers: {
+        "User-Agent": BROWSER_USER_AGENT,
+        Referer: `${PANAHON_BASE}/`,
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        ...(cookies ? { Cookie: cookies } : {}),
+        ...signedHeaders,
+      },
+      timeoutMs: 10_000,
+    });
+
+    const awsText = await awsRes.text();
+    let awsJson: any = null;
+    try { awsJson = JSON.parse(awsText); } catch {}
+    const count = Array.isArray(awsJson) ? awsJson.length : Array.isArray(awsJson?.data) ? awsJson.data.length : 0;
+
+    report.step3_signedGet = {
+      ok: awsRes.ok,
+      status: awsRes.status,
+      durationMs: Date.now() - t2,
+      itemCount: count,
+      rawSnippet: awsText.slice(0, 100),
+    };
+  } catch (err: any) {
+    report.error = err?.message || String(err);
+  }
+
+  report.totalDurationMs = Date.now() - t0;
+  return report;
 }

@@ -34,13 +34,24 @@ let cachedTelemetryResponse: TelemetryApiResponse | null = null;
 let cachedTelemetryAt = 0;
 const TELEMETRY_CACHE_TTL_MS = 30_000; // 30 seconds
 
-export async function GET(req?: Request): Promise<NextResponse<TelemetryApiResponse | { success: false; error: string }>> {
+export async function GET(req?: Request): Promise<NextResponse<any>> {
   let force = false;
+  let debug = false;
   if (req && req.url) {
     try {
       const url = new URL(req.url);
       force = url.searchParams.get("force") === "true";
+      debug = url.searchParams.get("debug") === "true";
     } catch {}
+  }
+
+  if (debug) {
+    const { diagnosePanahonConnection } = await import("@/lib/panahon-scraper");
+    const diag = await diagnosePanahonConnection();
+    return NextResponse.json(diag, {
+      status: 200,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   const now = Date.now();
