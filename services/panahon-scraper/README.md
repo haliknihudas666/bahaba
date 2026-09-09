@@ -39,7 +39,7 @@ bun install
 The worker automatically reads `../../.env.local` from the repository root, or a local `.env` file in this directory:
 
 ```env
-MONGODB_URI=mongodb+srv://fernandonicolei_db_user:...@cluster0.d0lp901.mongodb.net/?appName=Cluster0
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=Cluster0
 MONGODB_DB=bahaba
 # Optional: Interval in minutes (default is 5)
 INTERVAL_MINUTES=5
