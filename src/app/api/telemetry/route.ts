@@ -164,6 +164,43 @@ export async function GET(req?: Request): Promise<NextResponse<any>> {
   }
 }
 
+/**
+ * POST /api/telemetry
+ * Ingests external or client-synced telemetry stations into MongoDB Atlas.
+ */
+export async function POST(req: Request): Promise<NextResponse<any>> {
+  try {
+    const body = await req.json();
+    if (!body || !Array.isArray(body.stations) || body.stations.length === 0) {
+      return NextResponse.json(
+        { success: false, error: "Invalid payload: 'stations' array is required." },
+        { status: 400 }
+      );
+    }
+
+    const { saveTelemetrySnapshot } = await import("@/lib/weather");
+    const scrapedAt = typeof body.scrapedAt === "string" ? body.scrapedAt : new Date().toISOString();
+    const success = await saveTelemetrySnapshot(body.stations, scrapedAt);
+
+    // Invalidate local in-memory RAM cache so subsequent GET requests return fresh data immediately
+    cachedTelemetryResponse = null;
+    cachedTelemetryAt = 0;
+
+    return NextResponse.json({
+      success,
+      stationCount: body.stations.length,
+      scrapedAt,
+      syncedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error("[/api/telemetry] POST error:", err);
+    return NextResponse.json(
+      { success: false, error: err.message || "Failed to process telemetry payload" },
+      { status: 500 }
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Route segment config (prevents Next.js aggressive static caching & extends Vercel serverless timeout)
 // ---------------------------------------------------------------------------

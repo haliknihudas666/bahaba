@@ -5,6 +5,7 @@
 export {
   getLatestTelemetryStations,
   getLatestTelemetrySnapshot,
+  saveTelemetrySnapshot,
   getDistrictRainfall,
   interpolateRainfall,
   computeRainfallTrend,

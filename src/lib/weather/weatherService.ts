@@ -305,6 +305,61 @@ export async function getLatestTelemetrySnapshot(force = false): Promise<{ stati
 }
 
 /**
+ * Persist an externally scraped or synced telemetry snapshot directly into MongoDB.
+ */
+export async function saveTelemetrySnapshot(
+  liveStations: LiveStation[],
+  scrapedAt = new Date().toISOString()
+): Promise<boolean> {
+  if (!Array.isArray(liveStations) || liveStations.length === 0) return false;
+  const now = Date.now();
+  liveStations.sort((a, b) => a.stationName.localeCompare(b.stationName));
+  memoryStationsScrapedAt = scrapedAt;
+  memoryStationsCache = liveStations;
+  memoryStationsCachedAt = now;
+
+  try {
+    const syncMetaCol = await getWeatherMongoCollection("sync_meta");
+    if (syncMetaCol) {
+      await syncMetaCol.updateOne(
+        { _id: "telemetry" as any },
+        {
+          $set: {
+            _id: "telemetry" as any,
+            lastSyncedAt: scrapedAt,
+            stationCount: liveStations.length,
+            status: "SUCCESS",
+            updatedAtIso: scrapedAt,
+            stations: liveStations.map((s) => ({
+              stationId: s.stationId,
+              stationName: s.stationName,
+              coordinates: { latitude: s.latitude, longitude: s.longitude },
+              location: { type: "Point", coordinates: [s.longitude, s.latitude] },
+              geohash: s.geohash,
+              rain10m: s.rain10m,
+              rain1h: s.rain1h,
+              rain24h: s.rain24h,
+              waterLevel: s.waterLevel,
+              waterLevelDelta1h: s.waterLevelDelta1h,
+              waterRiskLevel: s.waterRiskLevel,
+              rainRiskLevel: s.rainRiskLevel,
+              riskLevel: s.riskLevel,
+              lastUpdated: s.lastUpdated instanceof Date ? s.lastUpdated.toISOString() : s.lastUpdated,
+            })),
+          },
+        },
+        { upsert: true }
+      );
+      console.log(`[WeatherService] MongoDB sync_meta successfully updated with ${liveStations.length} stations.`);
+      return true;
+    }
+  } catch (err: any) {
+    console.warn("[WeatherService] Failed to save telemetry snapshot to DB:", err.message);
+  }
+  return false;
+}
+
+/**
  * Compute rainfall trend over 3-hour projection
  */
 export function computeRainfallTrend(

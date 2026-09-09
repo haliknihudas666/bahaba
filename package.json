@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "sync": "bun run --env-file=.env.local scripts/sync-telemetry.ts",
+    "sync:watch": "bun run --env-file=.env.local scripts/sync-telemetry.ts --watch",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

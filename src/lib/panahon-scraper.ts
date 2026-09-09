@@ -381,10 +381,21 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
         });
 
         if (sigRes.ok) {
-          const sigJson = await sigRes.json();
-          if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
-            apiSig = sigJson.secret;
-            console.log("[Panahon] Active HMAC signing secret successfully acquired.");
+          const sigText = await sigRes.text();
+          if (sigText.startsWith("\x89PNG") || sigText.includes("PNG\r\n")) {
+            console.warn(
+              "[Panahon] Signature exchange returned a 1x1 tracking PNG pixel. Cloud datacenter IP is restricted by Panahon WAF. Relying on MongoDB Atlas telemetry snapshot."
+            );
+          } else {
+            try {
+              const sigJson = JSON.parse(sigText);
+              if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
+                apiSig = sigJson.secret;
+                console.log("[Panahon] Active HMAC signing secret successfully acquired.");
+              }
+            } catch (parseErr: any) {
+              console.warn("[Panahon] Failed to parse sig exchange response JSON:", parseErr?.message || parseErr);
+            }
           }
 
           // Merge updated session cookies from sig exchange if any
