@@ -14,8 +14,8 @@ interface TelemetrySidePanelProps {
   lastUpdatedFormatted: string | null;
   scrapedAt?: string | null;
   scrapedAtFormatted?: string | null;
-  syncing: boolean;
-  onSync: () => void;
+  syncing?: boolean;
+  onSync?: () => void;
   onOpenStationsTable: () => void;
   onOpenRoadsTable: () => void;
   onSelectStation?: (stationId: string) => void;
@@ -28,8 +28,6 @@ export default function TelemetrySidePanel({
   lastUpdatedFormatted,
   scrapedAt,
   scrapedAtFormatted,
-  syncing,
-  onSync,
   onOpenStationsTable,
   onOpenRoadsTable,
   onSelectStation,
@@ -109,27 +107,10 @@ export default function TelemetrySidePanel({
             </div>
           </div>
 
-          <button
-            onClick={onSync}
-            disabled={syncing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 hover:border-cyan-500/70 transition-all text-xs font-bold active:scale-95 disabled:opacity-50"
-            title="Refresh hydrological telemetry"
-          >
-            <svg
-              className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-            <span>{syncing ? "Syncing..." : "Sync Now"}</span>
-          </button>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-medium flex-shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Auto-Updated</span>
+          </div>
         </div>
 
         {/* ── 3. SCROLLABLE TELEMETRY METRIC CARDS ─────────────────────── */}

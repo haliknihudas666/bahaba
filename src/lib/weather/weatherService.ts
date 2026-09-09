@@ -113,12 +113,13 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
         metaDoc = null;
       }
 
+      let ageSec: number | string = "N/A";
       if (metaDoc) {
         const lastSynced = metaDoc.lastSyncedAt || metaDoc.updatedAtIso;
         const lastSyncedDate = lastSynced ? new Date(lastSynced) : null;
         // Consider data stale if older than 5 minutes
         isStale = !lastSyncedDate || isNaN(lastSyncedDate.getTime()) || (now - lastSyncedDate.getTime() > 5 * 60 * 1000);
-        const ageSec = lastSyncedDate ? Math.round((now - lastSyncedDate.getTime()) / 1000) : "N/A";
+        ageSec = lastSyncedDate ? Math.round((now - lastSyncedDate.getTime()) / 1000) : "N/A";
         console.log(
           `[WeatherService] MongoDB sync_meta doc found: stations=${metaDoc.stations?.length ?? 0}, lastSynced=${lastSynced} (age: ${ageSec}s, isStale: ${isStale})`
         );
@@ -126,9 +127,12 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
         console.log("[WeatherService] MongoDB sync_meta: no 'telemetry' doc found.");
       }
 
-      // If DB record exists and is fresh (< 5 mins) and force is not set, use DB record
-      if (!force && !isStale && metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
-        console.log(`[WeatherService] Serving ${metaDoc.stations.length} stations from fresh DB snapshot.`);
+      // In background worker architecture (e.g. Raspberry Pi PM2 worker),
+      // MongoDB Atlas is kept fresh continuously. Web requests serve the DB snapshot immediately.
+      if (metaDoc && Array.isArray(metaDoc.stations) && metaDoc.stations.length > 0) {
+        console.log(
+          `[WeatherService] Serving ${metaDoc.stations.length} stations from MongoDB snapshot (age: ${ageSec}s, isStale: ${isStale}).`
+        );
         memoryStationsScrapedAt = metaDoc.updatedAtIso || metaDoc.lastSyncedAt || metaDoc.scrapedAt || new Date().toISOString();
         const mapped: LiveStation[] = metaDoc.stations.map((st: any) => {
           const fallbackCoords = getStationCoords(st.stationName);
@@ -157,9 +161,15 @@ export async function getLatestTelemetryStations(force = false): Promise<LiveSta
       }
     }
 
-    // If DB is stale (> 5 mins), force requested, or DB is empty, trigger self-healing live ingest
+    // Only if MongoDB has no records or force is explicitly requested in non-Vercel environment
+    const isCloudServerless = process.env.VERCEL === "1" || process.env.AWS_LAMBDA_FUNCTION_NAME;
+    if (isCloudServerless) {
+      console.warn("[WeatherService] Cloud serverless environment detected; skipping live on-demand Panahon scrape to prevent WAF block.");
+      return memoryStationsCache || [];
+    }
+
     console.log(
-      `[WeatherService] Snapshot is stale or force requested (force=${force}, isStale=${isStale}). Triggering on-demand Panahon scrape...`
+      `[WeatherService] Triggering on-demand Panahon scrape (force=${force}, isStale=${isStale})...`
     );
     try {
       const { ingestTelemetry } = await import("@/lib/scraper");

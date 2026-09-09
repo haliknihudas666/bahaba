@@ -33,8 +33,8 @@ export interface TelemetryMetrics {
 interface MapHeaderControlsProps {
   lastUpdatedFormatted: string | null;
   metrics: TelemetryMetrics;
-  syncing: boolean;
-  onSync: () => void;
+  syncing?: boolean;
+  onSync?: () => void;
   onOpenDonationModal: () => void;
   onOpenShareModal: () => void;
   onOpenDrawer: () => void;
@@ -220,28 +220,6 @@ export default function MapHeaderControls({
           <span className="hidden 2xl:inline">About</span>
         </button>
 
-        {/* Sync Telemetry Button (Desktop) */}
-        <button
-          onClick={onSync}
-          disabled={syncing}
-          className="hidden sm:flex items-center gap-1 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 sm:px-2.5 sm:py-2 2xl:px-3 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-xl shadow-cyan-950/50 backdrop-blur-xl transition-all disabled:opacity-50 active:scale-95 flex-shrink-0"
-          title="Sync Latest PAGASA & Weather Telemetry"
-        >
-          <svg
-            className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-          <span className="hidden 2xl:inline">{syncing ? "Syncing" : "Sync"}</span>
-        </button>
 
         {/* ── 3. MOBILE-ONLY MORE MENU BUTTON (•••) ───────────────────────── */}
         <div ref={menuRef} className="sm:hidden relative">
@@ -311,35 +289,6 @@ export default function MapHeaderControls({
                 <span>Open Stations &amp; Road Tables</span>
               </button>
 
-              {/* Action 3: Sync Telemetry */}
-              <button
-                onClick={() => {
-                  onSync();
-                  setIsMobileMenuOpen(false);
-                }}
-                disabled={syncing}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 text-slate-200 hover:text-white transition-all text-xs font-semibold text-left"
-              >
-                <div className="flex items-center gap-2">
-                  <svg
-                    className={`w-4 h-4 text-cyan-400 ${syncing ? "animate-spin" : ""}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    />
-                  </svg>
-                  <span>{syncing ? "Syncing Telemetry..." : "Sync Live Data"}</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {lastUpdatedFormatted || "Live"}
-                </span>
-              </button>
 
               {/* Action 4: Share Report Card */}
               <button

@@ -32,7 +32,6 @@ import {
   trackRouteCalculation,
   trackStationSelected,
   trackRoadSelected,
-  trackTelemetrySync,
   trackTableTabSwitch,
 } from "@/lib/firebase/analytics";
 import type { LiveStation } from "@/types";
@@ -65,7 +64,6 @@ export default function HomePage() {
   } = useLiveAdvisories();
 
   // Layout & Modal Overlay States
-  const [syncing, setSyncing] = useState<boolean>(false);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
@@ -115,16 +113,6 @@ export default function HomePage() {
   const [loadingRoute, setLoadingRoute] = useState<boolean>(false);
   const [selectedRoadRisk, setSelectedRoadRisk] = useState<RoadRiskResult | null>(null);
 
-  // Telemetry Sync Trigger
-  const triggerTelemetrySync = async () => {
-    setSyncing(true);
-    trackTelemetrySync();
-    try {
-      await Promise.all([refreshTelemetry(), refreshAdvisories()]);
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   // Recenter map to Metro Manila
   const handleRecenter = () => {
@@ -447,12 +435,9 @@ export default function HomePage() {
         />
       </div>
 
-      {/* ── 2. TOP FLOATING HEADER / HUD BAR ───────────────────────────── */}
       <MapHeaderControls
         lastUpdatedFormatted={lastUpdatedFormatted}
         metrics={metrics}
-        syncing={syncing}
-        onSync={triggerTelemetrySync}
         onOpenDonationModal={() => setIsDonationModalOpen(true)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         onOpenAdvisoryModal={() => setIsAdvisoryModalOpen(true)}
@@ -486,7 +471,6 @@ export default function HomePage() {
         activeRoute={activeRoute}
       />
 
-      {/* ── 4. FLOATING RIGHT TELEMETRY & WEATHER SIDEBAR ──────────────── */}
       <TelemetrySidePanel
         isOpen={isTelemetryOpen}
         onClose={() => setIsTelemetryOpen(false)}
@@ -494,8 +478,6 @@ export default function HomePage() {
         lastUpdatedFormatted={lastUpdatedFormatted}
         scrapedAt={telemetryScrapedAt}
         scrapedAtFormatted={scrapedAtFormatted}
-        syncing={syncing}
-        onSync={triggerTelemetrySync}
         onOpenStationsTable={() => {
           setActiveTableTab("station-telemetry");
           setIsTableModalOpen(true);
