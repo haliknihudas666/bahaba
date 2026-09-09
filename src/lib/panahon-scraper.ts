@@ -1106,40 +1106,113 @@ export async function diagnosePanahonConnection(): Promise<Record<string, any>> 
 
     if (!token || !handle) return report;
 
-    // Step 2: Handle Exchange
-    const t1 = Date.now();
+    // Step 2: Handle Exchange - Test 5 variations to pinpoint what bypasses the 1x1 PNG
     const sigUrl = `${PANAHON_BASE}/api/v1/sig?token=${encodeURIComponent(token)}`;
-    const sigRes = await robustFetch(sigUrl, {
-      method: "GET",
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Referer: `${PANAHON_BASE}/`,
-        "X-Sig-Handle": handle,
-        ...(cookies ? { Cookie: cookies } : {}),
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "application/json, text/javascript, */*; q=0.01",
-      },
-      timeoutMs: 10_000,
-    });
+    const variations: Record<string, any> = {};
 
-    const sigText = await sigRes.text();
-    let sigJson: any = null;
-    try { sigJson = JSON.parse(sigText); } catch {}
-
-    report.step2_sigExchange = {
-      ok: sigRes.ok,
-      status: sigRes.status,
-      durationMs: Date.now() - t1,
-      secretAcquired: !!(sigJson && sigJson.secret),
-      rawSnippet: sigText.slice(0, 100),
+    const runVariant = async (name: string, customHeaders: Record<string, string>) => {
+      try {
+        const res = await robustFetch(sigUrl, {
+          method: "GET",
+          headers: {
+            "User-Agent": BROWSER_USER_AGENT,
+            Referer: `${PANAHON_BASE}/`,
+            "X-Sig-Handle": handle,
+            ...(cookies ? { Cookie: cookies } : {}),
+            ...customHeaders,
+          },
+          timeoutMs: 8000,
+        });
+        const text = await res.text();
+        let isSecret = false;
+        let secretVal = "";
+        try {
+          const j = JSON.parse(text);
+          if (j?.secret) {
+            isSecret = true;
+            secretVal = j.secret;
+          }
+        } catch {}
+        const isPng = text.startsWith("\x89PNG") || text.includes("PNG\r\n");
+        return {
+          status: res.status,
+          contentType: res.headers.get("content-type"),
+          isSecret,
+          secretVal,
+          isPng,
+          snippet: text.slice(0, 80),
+        };
+      } catch (err: any) {
+        return { error: err.message };
+      }
     };
 
-    if (!sigJson?.secret) return report;
+    variations["v1_current"] = await runVariant("v1_current", {
+      "X-Requested-With": "XMLHttpRequest",
+      Accept: "application/json, text/javascript, */*; q=0.01",
+    });
+
+    variations["v2_ph_forwarded"] = await runVariant("v2_ph_forwarded", {
+      "X-Forwarded-For": "112.198.114.34",
+      "X-Real-IP": "112.198.114.34",
+      "CF-Connecting-IP": "112.198.114.34",
+      "X-Requested-With": "XMLHttpRequest",
+      Accept: "application/json",
+    });
+
+    variations["v3_browser_sec_fetch"] = await runVariant("v3_browser_sec_fetch", {
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      Origin: "https://www.panahon.gov.ph",
+      Accept: "*/*",
+    });
+
+    variations["v4_minimal_fetch"] = await runVariant("v4_minimal_fetch", {
+      Accept: "*/*",
+    });
+
+    variations["v5_json_only"] = await runVariant("v5_json_only", {
+      Accept: "application/json",
+      Origin: "https://www.panahon.gov.ph",
+    });
+
+    variations["v6_realistic_browser"] = await runVariant("v6_realistic_browser", {
+      Accept: "*/*",
+      "Accept-Language": "en-US,en;q=0.9,fil;q=0.8",
+      "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      Referer: "https://www.panahon.gov.ph/",
+    });
+
+    variations["v7_browser_with_xhr"] = await runVariant("v7_browser_with_xhr", {
+      Accept: "application/json, text/javascript, */*; q=0.01",
+      "Accept-Language": "en-US,en;q=0.9,fil;q=0.8",
+      "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: "https://www.panahon.gov.ph/",
+    });
+
+    report.step2_sigExchange = variations;
+    const working = Object.entries(variations).find(([, v]) => v.isSecret);
+    report.step2_working_variant = working ? working[0] : "NONE";
+    const secret = working ? (working[1] as any).secretVal : "";
+
+    if (!secret) return report;
 
     // Step 3: Test signed GET
     const t2 = Date.now();
     const awsUrl = `${PANAHON_BASE}/api/v1/aws?token=${encodeURIComponent(token)}&parameter=rainfall`;
-    const signedHeaders = computePanahonHeaders("GET", awsUrl, sigJson.secret);
+    const signedHeaders = computePanahonHeaders("GET", awsUrl, secret);
     const awsRes = await robustFetch(awsUrl, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
