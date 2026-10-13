@@ -74,8 +74,9 @@ export default function HomePage() {
   const [isTelemetryOpen, setIsTelemetryOpen] = useState<boolean>(true);
   const [isTableModalOpen, setIsTableModalOpen] = useState<boolean>(false);
   const [recenterTrigger, setRecenterTrigger] = useState<number>(0);
-  const [showFloodHeatmap, setShowFloodHeatmap] = useState<boolean>(true);
+  const [showFloodHeatmap, setShowFloodHeatmap] = useState<boolean>(false);
   const [showFloodHazard, setShowFloodHazard] = useState<boolean>(false);
+  const [showRoadNetwork, setShowRoadNetwork] = useState<boolean>(true);
 
   // Close flood safe directions sidebar & telemetry panel by default on mobile devices
   useEffect(() => {
@@ -302,7 +303,7 @@ export default function HomePage() {
         roadName: road.name,
         elevationMeters: road.elevationM,
         severity,
-        color: depthCm < 5 ? "#00b4d8" : classification.color,
+        color: depthCm < 5 ? "#10b981" : classification.color,
         lineWeight: severity === "CRITICAL" ? 6 : 4,
         estimatedDepthCm: depthCm,
         depthCategory: classification.label as any,
@@ -416,6 +417,7 @@ export default function HomePage() {
         <RoadFloodMap
           stations={activeStations}
           heatmapPoints={backendHeatmapPoints}
+          evaluatedRoads={backendEvaluatedRoads}
           weatherSummary={weatherSummary}
           selectedStationId={selectedStationId}
           advisories={advisories}
@@ -430,6 +432,7 @@ export default function HomePage() {
           recenterTrigger={recenterTrigger}
           showHeatmap={showFloodHeatmap}
           showHazard={showFloodHazard}
+          showRoadNetwork={showRoadNetwork}
           onSelectRoad={(risk) => setSelectedRoadRisk(risk)}
           onRegionChange={updateRegion}
         />
@@ -521,6 +524,8 @@ export default function HomePage() {
       {/* ── 5. FLOATING MAP CONTROLS & DOCK (Bottom Right) ─────────────── */}
       <MapLegend
         travelMode={travelMode}
+        showRoadNetwork={showRoadNetwork}
+        onToggleRoadNetwork={() => setShowRoadNetwork((prev) => !prev)}
         showHeatmap={showFloodHeatmap}
         onToggleHeatmap={() => setShowFloodHeatmap((prev) => !prev)}
         showHazard={showFloodHazard}

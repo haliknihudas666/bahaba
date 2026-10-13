@@ -299,8 +299,8 @@ bahaba/
 │   │   ├── Map/
 │   │   │   ├── FloodHeatmapLayer.tsx   # Inundation density heatmap layer
 │   │   │   ├── LiveAdvisoryOverlayLayer.tsx # Social advisory pin cluster & popup cards
+│   │   │   ├── LiveFloodedRoadsLayer.tsx # Live Google Maps traffic-style road flood polyline layer
 │   │   │   ├── NOAHFloodHazardLayer.tsx# UP Project NOAH flood hazard zone layer
-│   │   │   ├── PMTilesFloodRoadsLayer.tsx # Vector tile road flood layer
 │   │   │   └── RoadFloodMap.tsx        # Base Leaflet map & route polyline renderer
 │   │   ├── Navigation/
 │   │   │   ├── RouteOptionCard.tsx     # Route summary card with flood clearance metrics

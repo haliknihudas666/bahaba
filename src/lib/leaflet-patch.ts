@@ -40,14 +40,24 @@ export function patchLeafletBounds(L: any) {
 
       if (
         typeof this.min.x !== "number" ||
+        typeof this.min.y !== "number" ||
         typeof this.max.x !== "number" ||
+        typeof this.max.y !== "number" ||
         typeof b.min.x !== "number" ||
-        typeof b.max.x !== "number"
+        typeof b.min.y !== "number" ||
+        typeof b.max.x !== "number" ||
+        typeof b.max.y !== "number"
       ) {
         return false;
       }
 
-      return originalIntersects.call(this, b);
+      // Safe AABB test directly without delegating back to unpatched/flaky method
+      return (
+        b.max.x >= this.min.x &&
+        b.min.x <= this.max.x &&
+        b.max.y >= this.min.y &&
+        b.min.y <= this.max.y
+      );
     };
   }
 
@@ -141,4 +151,27 @@ export function patchLeafletBounds(L: any) {
       };
     }
   }
+
+  // 6. Patch L.LineUtil.clipSegment to prevent crashes if bounds are invalid
+  if (L.LineUtil && L.LineUtil.clipSegment && !(L.LineUtil as any).__bahaba_clipsegment_patched__) {
+    (L.LineUtil as any).__bahaba_clipsegment_patched__ = true;
+    const originalClipSegment = L.LineUtil.clipSegment;
+    L.LineUtil.clipSegment = function (a: any, b: any, bounds: any, useLastCode: any, round: any) {
+      if (!bounds || !bounds.min || !bounds.max || !a || !b) {
+        return false;
+      }
+      try {
+        return originalClipSegment.call(this, a, b, bounds, useLastCode, round);
+      } catch {
+        return false;
+      }
+    };
+  }
+}
+
+// Auto-run immediately if Leaflet is already present in window
+if (typeof window !== "undefined" && (window as any).L) {
+  try {
+    patchLeafletBounds((window as any).L);
+  } catch {}
 }

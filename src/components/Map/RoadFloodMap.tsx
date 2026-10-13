@@ -6,14 +6,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LiveStation } from "@/types";
-import PMTilesFloodRoadsLayer from "./PMTilesFloodRoadsLayer";
+import LiveFloodedRoadsLayer from "./LiveFloodedRoadsLayer";
 import NOAHFloodHazardLayer from "./NOAHFloodHazardLayer";
 import FloodHeatmapLayer from "./FloodHeatmapLayer";
 import LiveAdvisoryOverlayLayer from "./LiveAdvisoryOverlayLayer";
 import type { RoadRiskResult, GeoJSONLineStringFeature } from "@/lib/engine/roadRisk";
 import type { RouteSegmentData, TravelMode } from "@/lib/engine/routeSolver";
 import type { ReportedAdvisory } from "@/types/advisory";
-import type { FloodHeatmapPoint } from "@/lib/flood-engine";
+import type { FloodHeatmapPoint, EvaluatedRoadRisk } from "@/lib/flood-engine";
 import { patchLeafletBounds } from "@/lib/leaflet-patch";
 
 interface RoadFloodMapProps {
@@ -21,6 +21,8 @@ interface RoadFloodMapProps {
   stations: LiveStation[];
   /** Precalculated heatmap points from backend */
   heatmapPoints?: FloodHeatmapPoint[];
+  /** Precalculated evaluated roads from backend */
+  evaluatedRoads?: EvaluatedRoadRisk[];
   /** Selected station ID for focus */
   selectedStationId?: string | null;
   /** Active reported road flood advisories */
@@ -51,6 +53,8 @@ interface RoadFloodMapProps {
   showHeatmap?: boolean;
   /** UP NOAH Hazard PMTiles overlay active state */
   showHazard?: boolean;
+  /** Live Road Flood Network overlay active state */
+  showRoadNetwork?: boolean;
   /** Regional weather summary from backend */
   weatherSummary?: {
     metroManilaRainMmHr: number;
@@ -66,6 +70,7 @@ interface RoadFloodMapProps {
 export default function RoadFloodMap({
   stations,
   heatmapPoints = [],
+  evaluatedRoads = [],
   weatherSummary = null,
   selectedStationId,
   advisories = [],
@@ -80,8 +85,9 @@ export default function RoadFloodMap({
   customRoads,
   travelMode = "driving",
   recenterTrigger = 0,
-  showHeatmap = true,
+  showHeatmap = false,
   showHazard = false,
+  showRoadNetwork = true,
   onRegionChange,
 }: RoadFloodMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -103,8 +109,9 @@ export default function RoadFloodMap({
 
     const initMap = () => {
       const L = (window as any).L;
-      if (!L || leafletMapRef.current) return;
+      if (!L) return;
       patchLeafletBounds(L);
+      if (leafletMapRef.current) return;
 
       const map = L.map(mapContainerRef.current, {
         center: [14.633, 121.095], // Metro Manila Pasig-Marikina River Basin center
@@ -112,15 +119,19 @@ export default function RoadFloodMap({
         zoomControl: false,
       });
 
+      // High-performance OpenStreetMap basemap via CartoDB Dark Matter CDN
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
+          subdomains: "abcd",
+          maxZoom: 20,
+        }
+      ).addTo(map);
+
       // Add Zoom control at bottomright
       L.control.zoom({ position: "bottomright" }).addTo(map);
-
-      // Add OpenStreetMap & Protomaps attribution for the Philippines Vector PMTiles basemap
-      if (map.attributionControl) {
-        map.attributionControl.addAttribution(
-          '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://protomaps.com/" target="_blank" rel="noopener">Protomaps</a>'
-        );
-      }
 
       // Debounced region & zoom change listener when panning/zooming across provinces or into cities
       let moveTimeout: NodeJS.Timeout | null = null;
@@ -176,7 +187,11 @@ export default function RoadFloodMap({
       script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
       script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
       script.crossOrigin = "";
-      script.onload = initMap;
+      script.onload = () => {
+        const L = (window as any).L;
+        if (L) patchLeafletBounds(L);
+        initMap();
+      };
       document.head.appendChild(script);
     }
 
@@ -723,13 +738,16 @@ export default function RoadFloodMap({
             map={leafletMapRef.current}
             visible={showHazard}
           />
-          <PMTilesFloodRoadsLayer
+          <LiveFloodedRoadsLayer
             map={leafletMapRef.current}
-            visible={true}
             stations={stations}
             rainRate={weatherSummary?.metroManilaRainMmHr ?? 0}
             rain24h={weatherSummary?.metroManilaRain24hMm ?? 0}
+            evaluatedRoads={evaluatedRoads}
+            selectedRoad={selectedRoad}
+            onSelectRoad={onSelectRoad}
             dimmed={hasActiveRoute}
+            visible={showRoadNetwork}
           />
           <LiveAdvisoryOverlayLayer
             map={leafletMapRef.current}
@@ -772,11 +790,22 @@ export default function RoadFloodMap({
         .flooded-segment-pulse {
           animation: floodSegmentPulse 1.8s ease-in-out infinite;
         }
+        @keyframes floodRoadPulse {
+          0%, 100% {
+            filter: drop-shadow(0 0 5px rgba(220, 38, 38, 0.75));
+          }
+          50% {
+            filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.95));
+          }
+        }
+        .flooded-road-pulse {
+          animation: floodRoadPulse 1.8s ease-in-out infinite;
+        }
         .map-dimmed .leaflet-tile-pane {
           filter: brightness(0.70) contrast(1.08);
           transition: filter 0.5s ease;
         }
-        .custom-station-icon, .custom-pin-a, .custom-pin-b {
+        .custom-station-icon, .custom-pin-a, .custom-pin-b, .custom-route-shield-icon, .custom-road-closed-icon {
           background: transparent !important;
           border: none !important;
         }

@@ -187,7 +187,7 @@ export function classifyFloodRisk(depthCm: number): RiskClassification {
 
   return {
     category: "NORMAL",
-    color: "#00b4d8", // Blue
+    color: "#10b981", // Emerald Green
     label: "Normal / Clear (0–4 cm)",
     lineWeight: 5,
     passableVehicles: ["All Vehicles (Sedan, Motorcycle, SUV, Truck)"],

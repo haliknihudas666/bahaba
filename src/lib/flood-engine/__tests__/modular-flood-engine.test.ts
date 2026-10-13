@@ -84,6 +84,32 @@ async function runModularFloodEngineTests() {
   console.assert(heatmap.length >= NOAH_METRO_MANILA_HOTSPOTS.length, "Heatmap should cover all NOAH hotspots");
   console.log(`[PASS] Precomputed ${heatmap.length} continuous spatial heatmap points`);
 
+  // Test 7: Normal / Clear Road Traffic Color Mapping
+  const dryClassification = classifyFloodRisk(2);
+  console.assert(dryClassification.category === "NORMAL", `Expected NORMAL category, got ${dryClassification.category}`);
+  console.assert(dryClassification.color === "#10b981", `Expected traffic emerald green #10b981, got ${dryClassification.color}`);
+  console.log(`[PASS] Dry road (<5cm) classified as NORMAL with traffic emerald green (#10b981)`);
+
+  const dryEvaluatedRoads = await evaluateMonitoredRoads([], {
+    latitude: 14.6,
+    longitude: 121.0,
+    currentRainMmHr: 0,
+    rain24hMm: 0,
+    forecast1hMm: 0,
+    forecast2hMm: 0,
+    forecast3hMm: 0,
+    forecast3hTotalMm: 0,
+    forecastPeakMmHr: 0,
+    precipProbability: 0,
+    trend: "DRY",
+    conditionLabel: "Clear / Dry",
+    isRaining: false,
+    fetchedAt: new Date().toISOString(),
+  });
+  const normalRoads = dryEvaluatedRoads.filter((r) => r.severity === "NORMAL" && r.color === "#10b981");
+  console.assert(normalRoads.length === dryEvaluatedRoads.length, "All roads should be NORMAL #10b981 under dry weather");
+  console.log(`[PASS] All ${dryEvaluatedRoads.length} monitored corridors confirmed NORMAL (#10b981) under dry weather`);
+
   console.log("\n✅ All Modular Flood Engine Tests Passed Successfully!\n");
 }
 

@@ -54,8 +54,8 @@ function runRoadRiskTests() {
   // Test 3: Color & Severity Mapping Rules
   const normalRes = classifySeverity(4);
   assert(
-    normalRes.severity === "NORMAL" && normalRes.hex === "#00b4d8" && normalRes.weight === 3,
-    `0-4 cm maps to NORMAL (#00b4d8, weight: 3)`
+    normalRes.severity === "NORMAL" && normalRes.hex === "#10b981" && normalRes.weight === 3,
+    `0-4 cm maps to NORMAL (#10b981, weight: 3)`
   );
 
   const alertRes = classifySeverity(10);

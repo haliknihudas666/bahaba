@@ -168,7 +168,7 @@ export function classifyFloodRisk(depthCm: number): {
     category: "NORMAL",
     severity: "NORMAL",
     depthCategory: "Normal / Clear",
-    color: "#00b4d8", // Blue
+    color: "#10b981", // Emerald Green
     label: "Normal / Clear (0–4 cm)",
     lineWeight: 4,
     passableVehicles: ["All Vehicles (Sedan, Motorcycle, SUV, Truck)"],
@@ -239,7 +239,7 @@ export async function evaluateLocation(
     hazardScore,
     riskCategory: classification.category,
     severity: classification.severity,
-    color: depthCm < 5 ? "#00b4d8" : classification.color,
+    color: depthCm < 5 ? "#10b981" : classification.color,
     label: classification.label,
     elevationM,
     noahLevel: noahHazard.noahLevel,
@@ -339,7 +339,7 @@ export async function evaluateMonitoredRoads(
       estimatedDepthCm: depthCm,
       hazardScore,
       severity: classification.severity,
-      color: depthCm < 5 ? "#00b4d8" : classification.color,
+      color: depthCm < 5 ? "#10b981" : classification.color,
       depthCategory: classification.depthCategory,
       lineWeight: classification.lineWeight,
       drivableVehicles: classification.passableVehicles,

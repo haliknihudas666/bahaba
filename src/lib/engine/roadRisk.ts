@@ -70,7 +70,7 @@ export const SEVERITY_RULES = {
     label: "NORMAL",
     minCm: 0,
     maxCm: 4,
-    hex: "#00b4d8", // Blue
+    hex: "#10b981", // Emerald Green
     weight: 3,
     description: "Normal / Clear (0–4 cm water predicted)",
     depthCategory: "Normal / Clear",

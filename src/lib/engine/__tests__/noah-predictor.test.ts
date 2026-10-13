@@ -39,7 +39,7 @@ function runNoahPredictorTests() {
 
   // Test 3: Risk Classification Mapping
   const normalClass = classifyFloodRisk(3);
-  assert(normalClass.category === "NORMAL" && normalClass.color === "#00b4d8", "3 cm maps to NORMAL (#00b4d8)");
+  assert(normalClass.category === "NORMAL" && normalClass.color === "#10b981", "3 cm maps to NORMAL (#10b981)");
 
   const lowClass = classifyFloodRisk(10);
   assert(lowClass.category === "LOW" && lowClass.color === "#f97316", "10 cm maps to LOW (#f97316 / Gutter Deep)");

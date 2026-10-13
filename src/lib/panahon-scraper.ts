@@ -14,6 +14,7 @@
 
 import crypto from "crypto";
 import https from "https";
+import { PANAHON_SIG_RECIPE, decodeSeedToSecret } from "./panahon-crypto";
 import type {
   FloodRiskLevel,
   LiveStation,
@@ -31,13 +32,19 @@ export const PANAHON_BASE = "https://www.panahon.gov.ph";
 
 /** Default fallback API token provided for Panahon data feeds */
 export const DEFAULT_PANAHON_TOKEN =
-  process.env.PANAHON_API_TOKEN || "hUkBqcnq8GBpfV4SN4TSVb1fB1eKYeHXEx9WvpvK";
+  process.env.PANAHON_API_TOKEN || "QYjVyyxaFXQ6AubwgFrf6CRF1PwgOlCnT3JZXFeV";
 
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 20_000;
+
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 10,
+  timeout: 25_000,
+});
 
 /**
  * Universal HTTP/HTTPS fetcher with fallback to native node:https module.
@@ -91,6 +98,7 @@ export async function robustFetch(
           method: options.method || "GET",
           headers: options.headers,
           timeout,
+          agent: keepAliveAgent,
         },
         (res) => {
           let data = "";
@@ -373,6 +381,7 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
             "User-Agent": BROWSER_USER_AGENT,
             Referer: `${PANAHON_BASE}/`,
             "X-Sig-Handle": handle,
+            "X-Sig-Recipe": PANAHON_SIG_RECIPE,
             ...(cookies ? { Cookie: cookies } : {}),
             "X-Requested-With": "XMLHttpRequest",
             Accept: "application/json, text/javascript, */*; q=0.01",
@@ -389,7 +398,10 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
           } else {
             try {
               const sigJson = JSON.parse(sigText);
-              if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
+              if (sigJson && typeof sigJson.seed === "string" && sigJson.seed) {
+                apiSig = decodeSeedToSecret(sigJson.seed);
+                console.log("[Panahon] Active HMAC signing secret derived from seed successfully.");
+              } else if (sigJson && typeof sigJson.secret === "string" && sigJson.secret) {
                 apiSig = sigJson.secret;
                 console.log("[Panahon] Active HMAC signing secret successfully acquired.");
               }
@@ -720,29 +732,30 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
   const start = Date.now();
 
   try {
-    // Concurrently fetch all relevant Panahon data streams
-    const [
-      riverWaterRes,
-      riverRainRes,
-      awsRainRes,
-      awsTempRes,
-      awsHeatRes,
-      awsHumRes,
-      awsPressRes,
-      awsWindSpeedRes,
-      awsWindDirRes,
-      synopRainRes,
-    ] = await Promise.allSettled([
+    // Batch 1: River basin sensors (crucial hydrological water stage & rain)
+    const [riverWaterRes, riverRainRes] = await Promise.allSettled([
       fetchPanahonRiverbasin("waterlevel"),
       fetchPanahonRiverbasin("raingauge"),
+    ]);
+
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Batch 2: Core AWS & Synoptic precipitation and temperature
+    const [awsRainRes, awsTempRes, synopRainRes] = await Promise.allSettled([
       fetchPanahonAws("rainfall"),
       fetchPanahonAws("temperature"),
+      fetchPanahonSynop("rain"),
+    ]);
+
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Batch 3: Atmospheric conditions (heat index, humidity, pressure, wind)
+    const [awsHeatRes, awsHumRes, awsPressRes, awsWindSpeedRes, awsWindDirRes] = await Promise.allSettled([
       fetchPanahonAws("heat-index"),
       fetchPanahonAws("humidity"),
       fetchPanahonAws("pressure"),
       fetchPanahonAws("wind-speed"),
       fetchPanahonAws("wind-direction"),
-      fetchPanahonSynop("rain"),
     ]);
 
     const riverWaterItems = riverWaterRes.status === "fulfilled" ? riverWaterRes.value : [];
@@ -998,6 +1011,47 @@ export async function fetchPanahonCompleteTelemetry(): Promise<ScrapeResult> {
       }
     }
 
+    // 4. Process Synoptic Stations (if not already merged into an AWS station)
+    for (const item of synopRainItems) {
+      const lat = cleanNumber(item.lat);
+      const lon = cleanNumber(item.lon);
+      if (!lat || !lon) continue;
+
+      const stationName = cleanStationName(item.site_name) || `Synoptic ${item.site_id}`;
+      const key = makeKey(lat, lon, stationName);
+      if (stationMap.has(key)) continue;
+
+      const rain1h = cleanNumber(item.value);
+      const observedAtIso = parseObservedAtToIso(item.observed_at);
+
+      const rainfall: RainfallReading = {
+        stationName,
+        rain10min: 0,
+        rain30min: 0,
+        rain1hr: rain1h,
+        rain3hr: rain1h,
+        rain6hr: 0,
+        rain12hr: 0,
+        rain24hr: rain1h * 3,
+      };
+
+      rawRainfallReadings.push(rainfall);
+      const rainRiskLevel = classifyRainRisk(rainfall);
+
+      stationMap.set(key, {
+        stationName: `${stationName} (SYNOP)`,
+        latitude: lat,
+        longitude: lon,
+        rainfall,
+        waterLevel: null,
+        waterRiskLevel: "NORMAL",
+        rainRiskLevel,
+        riskLevel: rainRiskLevel,
+        observedAt: observedAtIso,
+        siteId: item.site_id,
+      });
+    }
+
     const stations = Array.from(stationMap.values());
     stations.sort((a, b) => a.stationName.localeCompare(b.stationName));
 
@@ -1129,6 +1183,7 @@ export async function diagnosePanahonConnection(): Promise<Record<string, any>> 
             "User-Agent": BROWSER_USER_AGENT,
             Referer: `${PANAHON_BASE}/`,
             "X-Sig-Handle": handle,
+            "X-Sig-Recipe": PANAHON_SIG_RECIPE,
             ...(cookies ? { Cookie: cookies } : {}),
             ...customHeaders,
           },
@@ -1139,7 +1194,10 @@ export async function diagnosePanahonConnection(): Promise<Record<string, any>> 
         let secretVal = "";
         try {
           const j = JSON.parse(text);
-          if (j?.secret) {
+          if (j?.seed) {
+            isSecret = true;
+            secretVal = decodeSeedToSecret(j.seed);
+          } else if (j?.secret) {
             isSecret = true;
             secretVal = j.secret;
           }
