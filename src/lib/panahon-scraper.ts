@@ -14,7 +14,12 @@
 
 import crypto from "crypto";
 import https from "https";
-import { PANAHON_SIG_RECIPE, decodeSeedToSecret } from "./panahon-crypto";
+import {
+  PANAHON_SIG_RECIPE,
+  getActivePanahonRecipe,
+  syncPanahonCryptoFromScript,
+  decodeSeedToSecret,
+} from "./panahon-crypto";
 import type {
   FloodRiskLevel,
   LiveStation,
@@ -30,9 +35,8 @@ import type {
 
 export const PANAHON_BASE = "https://www.panahon.gov.ph";
 
-/** Default fallback API token provided for Panahon data feeds */
-export const DEFAULT_PANAHON_TOKEN =
-  process.env.PANAHON_API_TOKEN || "QYjVyyxaFXQ6AubwgFrf6CRF1PwgOlCnT3JZXFeV";
+/** Default fallback API token provided for Panahon data feeds (if set via environment) */
+export const DEFAULT_PANAHON_TOKEN = process.env.PANAHON_API_TOKEN || "";
 
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -300,7 +304,7 @@ export function parseObservedAtToIso(observedAt: string | undefined | null): str
 
 let cachedPanahonSession: PanahonSessionData | null = null;
 let inflightSessionPromise: Promise<PanahonSessionData | null> | null = null;
-const SESSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SESSION_CACHE_TTL_MS = 2.5 * 60 * 1000; // 2.5 minutes (asset_ticket cookie expires in 3 mins)
 
 /**
  * Fetches CSRF token, session cookies, and exchanges api-sig-handle for the HMAC signing secret.
@@ -373,6 +377,13 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
     // Perform two-step handle exchange if handle is provided
     if (handle) {
       try {
+        // Dynamically detect and synchronize active recipe and seed permutation from beta.js
+        const scriptMatch = html.match(/src=["'](https:\/\/[^"']*\/js\/beta\.[a-f0-9]+\.js)["']/i);
+        if (scriptMatch && scriptMatch[1]) {
+          await syncPanahonCryptoFromScript(scriptMatch[1]);
+        }
+        const activeRecipe = getActivePanahonRecipe();
+
         const sigUrl = `${PANAHON_BASE}/api/v1/sig?token=${encodeURIComponent(token)}`;
         console.log(`[Panahon] Exchanging signature handle with ${sigUrl}...`);
         const sigRes = await robustFetch(sigUrl, {
@@ -381,7 +392,7 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
             "User-Agent": BROWSER_USER_AGENT,
             Referer: `${PANAHON_BASE}/`,
             "X-Sig-Handle": handle,
-            "X-Sig-Recipe": PANAHON_SIG_RECIPE,
+            "X-Sig-Recipe": activeRecipe,
             ...(cookies ? { Cookie: cookies } : {}),
             "X-Requested-With": "XMLHttpRequest",
             Accept: "application/json, text/javascript, */*; q=0.01",
@@ -418,6 +429,35 @@ export async function getPanahonSession(forceRefresh = false): Promise<PanahonSe
           }
         } else {
           console.warn(`[Panahon] Signature handle exchange returned HTTP ${sigRes.status}`);
+          // If signature exchange returned 404, recipe or algorithm was rotated by PAGASA.
+          // Trigger forced dynamic resynchronization from active beta.js bundle.
+          if (sigRes.status === 404 && scriptMatch && scriptMatch[1]) {
+            console.log("[Panahon] Triggering forced dynamic crypto resync from active bundle...");
+            await syncPanahonCryptoFromScript(scriptMatch[1], true);
+            const updatedRecipe = getActivePanahonRecipe();
+            const retrySigRes = await robustFetch(sigUrl, {
+              method: "GET",
+              headers: {
+                "User-Agent": BROWSER_USER_AGENT,
+                Referer: `${PANAHON_BASE}/`,
+                "X-Sig-Handle": handle,
+                "X-Sig-Recipe": updatedRecipe,
+                ...(cookies ? { Cookie: cookies } : {}),
+                "X-Requested-With": "XMLHttpRequest",
+                Accept: "application/json, text/javascript, */*; q=0.01",
+              },
+              timeoutMs: 10_000,
+            });
+            if (retrySigRes.ok) {
+              try {
+                const retrySigJson = await retrySigRes.json();
+                if (retrySigJson && typeof retrySigJson.seed === "string") {
+                  apiSig = decodeSeedToSecret(retrySigJson.seed);
+                  console.log("[Panahon] HMAC secret recovered after forced dynamic crypto resync.");
+                }
+              } catch {}
+            }
+          }
         }
       } catch (handshakeErr) {
         console.warn(
@@ -475,27 +515,27 @@ export function computePanahonHeaders(
 }
 
 /**
- * Resolve effective token, apiSig, and cookies (override, env var, or dynamic handshake).
+ * Resolve effective token, apiSig, and cookies (dynamic handshake prioritized over static env vars).
  */
 async function resolveSession(tokenOverride?: string): Promise<{ token: string; apiSig?: string; cookies?: string }> {
-  if (tokenOverride) {
-    return { token: tokenOverride };
-  }
-
   const session = await getPanahonSession();
   if (session?.token) {
     return {
-      token: session.token,
+      token: tokenOverride || session.token,
       apiSig: session.apiSig,
       cookies: session.cookies,
     };
+  }
+
+  if (tokenOverride) {
+    return { token: tokenOverride };
   }
 
   if (process.env.PANAHON_API_TOKEN) {
     return { token: process.env.PANAHON_API_TOKEN };
   }
 
-  return { token: DEFAULT_PANAHON_TOKEN };
+  return { token: "" };
 }
 
 /**
@@ -510,7 +550,9 @@ async function executeSignedPanahonGet(
 
   const buildUrl = (sess: { token: string; apiSig?: string; cookies?: string }) => {
     const u = new URL(urlPath, PANAHON_BASE);
-    u.searchParams.set("token", sess.token);
+    if (sess.token) {
+      u.searchParams.set("token", sess.token);
+    }
     for (const [k, v] of Object.entries(searchParams)) {
       u.searchParams.set(k, v);
     }
@@ -535,8 +577,8 @@ async function executeSignedPanahonGet(
 
   let res = await doFetch(session);
 
-  // If unauthorized, forbidden, or not found (often indicating an expired or rejected session), retry once with fresh session
-  if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404) && !tokenOverride) {
+  // If unauthorized, forbidden, or not found (often indicating an expired or rejected session), retry once with fresh dynamic session
+  if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404)) {
     console.warn(`[Panahon] ${urlPath} returned HTTP ${res.status}. Refreshing session credentials and retrying...`);
     const freshSession = await getPanahonSession(true);
     if (freshSession?.token) {

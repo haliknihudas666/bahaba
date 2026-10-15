@@ -119,16 +119,41 @@ export default function RoadFloodMap({
         zoomControl: false,
       });
 
-      // High-performance OpenStreetMap basemap via CartoDB Dark Matter CDN
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
-          subdomains: "abcd",
-          maxZoom: 20,
-        }
-      ).addTo(map);
+      // High-performance dark basemap: CARTO Dark Matter (with API key) or Esri Dark Gray fallback
+      const cartoApiKey = process.env.NEXT_PUBLIC_CARTO_API_KEY?.trim();
+      const baseTileUrl = cartoApiKey
+        ? `https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoApiKey)}`
+        : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+
+      const labelsTileUrl = cartoApiKey
+        ? `https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoApiKey)}`
+        : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
+
+      const basemapAttribution = cartoApiKey
+        ? '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+        : '&copy; <a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a> &copy; OpenStreetMap contributors';
+
+      // 1. Base map geometry layer (land, water, building blocks, roads)
+      L.tileLayer(baseTileUrl, {
+        attribution: basemapAttribution,
+        subdomains: cartoApiKey ? "abcd" : "",
+        maxZoom: 20,
+      }).addTo(map);
+
+      // 2. High-contrast crisp white labels layer for place names
+      map.createPane("labelsPane");
+      const labelsPane = map.getPane("labelsPane");
+      if (labelsPane) {
+        labelsPane.style.zIndex = "450"; // Above road polylines (zIndex 400), below sensor markers (zIndex 600)
+        labelsPane.style.pointerEvents = "none";
+      }
+
+      L.tileLayer(labelsTileUrl, {
+        pane: "labelsPane",
+        className: "carto-white-labels",
+        subdomains: cartoApiKey ? "abcd" : "",
+        maxZoom: 20,
+      }).addTo(map);
 
       // Add Zoom control at bottomright
       L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -804,6 +829,11 @@ export default function RoadFloodMap({
         .map-dimmed .leaflet-tile-pane {
           filter: brightness(0.70) contrast(1.08);
           transition: filter 0.5s ease;
+        }
+        .carto-white-labels,
+        .leaflet-pane.leaflet-labelsPane-pane {
+          filter: brightness(3.5) contrast(1.2) saturate(0) !important;
+          pointer-events: none !important;
         }
         .custom-station-icon, .custom-pin-a, .custom-pin-b, .custom-route-shield-icon, .custom-road-closed-icon {
           background: transparent !important;

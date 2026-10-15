@@ -44,3 +44,11 @@ body {
   background: rgba(100, 116, 139, 1);
 }
 
+/* Crisp white place names & city labels on CARTO and Esri basemaps */
+.carto-white-labels,
+.leaflet-pane.leaflet-labelsPane-pane {
+  filter: brightness(3.5) contrast(1.2) saturate(0) !important;
+  pointer-events: none !important;
+}
+
+
